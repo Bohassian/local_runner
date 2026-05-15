@@ -16,6 +16,31 @@ services:
               count: all
               capabilities: [gpu]
 
+  # One-shot service: pulls the declared models into the ollama-models volume
+  # on every `compose up`. Pulls are no-ops if the models are already present,
+  # so re-running is cheap. Exits when done. The model list lives in .env.
+  ollama-pull:
+    image: ollama/ollama:0.24.0
+    depends_on:
+      ollama:
+        condition: service_started
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+      PRIMARY_MODEL: "${PRIMARY_MODEL:-qwen2.5-coder:7b}"
+      EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Pulling primary model: $$PRIMARY_MODEL"
+        ollama pull "$$PRIMARY_MODEL"
+        echo "Pulling embedding model: $$EMBED_MODEL"
+        ollama pull "$$EMBED_MODEL"
+        echo "Model pulls complete."
+    restart: "no"
+
   mcp-memory:
     build:
       context: ./mcp-memory

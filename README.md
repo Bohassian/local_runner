@@ -31,8 +31,6 @@ Also: ensure Node 22 is active (`asdf install nodejs 22.12.0 && asdf reshim`).
 ```bash
 cp .env.example .env
 docker compose up -d ollama
-docker compose exec ollama ollama pull qwen2.5-coder:7b
-docker compose exec ollama ollama pull nomic-embed-text
 docker compose up -d --build mcp-memory
 ```
 
