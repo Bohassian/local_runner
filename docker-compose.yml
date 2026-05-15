@@ -1,9 +1,7 @@
-# NOTE: image tags below are :latest for the initial run. After the first
-# successful `docker compose pull`, pin them to the resolved digest/tag
-# (see PLAN.md → "Paranoid defaults committed: pin Ollama versions").
 services:
   ollama:
-    image: ollama/ollama:latest
+    # Pinned 2026-05-15. Bump deliberately after verifying compatibility.
+    image: ollama/ollama:0.24.0
     container_name: local-runner-ollama
     restart: unless-stopped
     ports:
