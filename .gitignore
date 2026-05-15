@@ -1,0 +1,27 @@
+PLAN.md
+NOTES.md
+
+# Node
+node_modules/
+*.tsbuildinfo
+dist/
+build/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Local data / artifacts (extracted schemas, package docs, snapshots)
+data/
+
+# SQLite store
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# OS / IDE
+.DS_Store
+*.log
+.vscode/

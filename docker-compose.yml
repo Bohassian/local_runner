@@ -1,0 +1,36 @@
+# NOTE: image tags below are :latest for the initial run. After the first
+# successful `docker compose pull`, pin them to the resolved digest/tag
+# (see PLAN.md → "Paranoid defaults committed: pin Ollama versions").
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: local-runner-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  mcp-memory:
+    build:
+      context: ./mcp-memory
+    container_name: local-runner-mcp-memory
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      MCP_MEMORY_PORT: "3939"
+      EMBED_BASE_URL: "${EMBED_BASE_URL:-http://ollama:11434}"
+      EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
+    ports:
+      - "${MCP_MEMORY_PORT:-3939}:3939"
+
+volumes:
+  ollama-models:
