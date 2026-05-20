@@ -50,10 +50,15 @@ services:
       - ollama
     environment:
       MCP_MEMORY_PORT: "3939"
+      MCP_MEMORY_DB_PATH: "/app/data/mcp-memory.db"
       EMBED_BASE_URL: "${EMBED_BASE_URL:-http://ollama:11434}"
       EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
     ports:
       - "${MCP_MEMORY_PORT:-3939}:3939"
+    volumes:
+      # Bind-mount host ./data so ingest scripts on the host and the server in
+      # the container share the same sqlite-vec DB file.
+      - ./data:/app/data
 
 volumes:
   ollama-models:

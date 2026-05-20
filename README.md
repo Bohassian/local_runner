@@ -61,6 +61,71 @@ In VS Code:
    ```
 4. Open any project in VS Code, ask Cline to "call the ping tool from memory with the message 'hello'." Should round-trip.
 
+## Phase 2 — Godot docs ingestion
+
+Replaces the `ping` tool with a real `lookup_docs(query, k)` tool backed by a `sqlite-vec` index of the Godot manual + tutorials, plus any user-authored markdown you drop in `data/reference/`.
+
+### One-time: clone the Godot docs
+
+```bash
+mkdir -p data
+git clone --depth 1 https://github.com/godotengine/godot-docs data/godot-docs
+```
+
+(Use `--depth 1` to skip ~1.5 GB of history. Re-pull with `git -C data/godot-docs pull` when you want fresher docs.)
+
+### One-time: install host-side ingest deps
+
+The ingest scripts run on the host (not in Docker) so they can read `data/godot-docs/` directly and re-iterate fast.
+
+```bash
+cd ingest
+yarn install
+cd ..
+```
+
+### Rebuild mcp-memory and bring it up
+
+The phase-1 image only has the `ping` tool. Rebuild and restart:
+
+```bash
+docker compose up -d --build mcp-memory
+```
+
+mcp-memory probes Ollama for the embedding model at startup. If `nomic-embed-text` isn't pulled, this fails — `docker compose up -d ollama-pull` first to seed it.
+
+### Run ingest
+
+```bash
+cd ingest
+yarn ingest:godot        # ~few minutes; depends on GPU + chunk count
+yarn ingest:reference    # near-instant if data/reference/ is empty
+# or both:
+yarn ingest:all
+```
+
+Re-running is idempotent: each source's rows are wiped and re-inserted on every run.
+
+### Verify
+
+```bash
+# Should now list lookup_docs (not ping):
+npx @modelcontextprotocol/inspector http://localhost:3939/mcp
+
+# Or test from Cline: "Use the lookup_docs tool to find chunks about Node2D input handling."
+```
+
+Watch container logs (`docker compose logs -f mcp-memory`) to confirm the model is actually calling the tool. The tool description is directive but small models still sometimes skip it.
+
+### Refresh workflow
+
+```bash
+git -C data/godot-docs pull           # update upstream docs
+cd ingest && yarn ingest:all          # re-embed
+```
+
+No live filesystem watcher; refresh is manual on purpose.
+
 ## Layout
 
 | Path | What |
@@ -68,5 +133,8 @@ In VS Code:
 | `PLAN.md` | Architecture + phasing (local-only). |
 | `docker-compose.yml` | Ollama + mcp-memory services. |
 | `mcp-memory/` | TypeScript MCP server (HTTP transport). |
+| `ingest/` | Host-side ingest scripts (`tsx`). |
+| `data/godot-docs/` | Pre-cloned Godot docs (gitignored). |
+| `data/reference/` | User-authored markdown (gitignored). |
+| `data/mcp-memory.db` | sqlite-vec store; bind-mounted into mcp-memory. |
 | `.env.example` | Config knobs; copy to `.env`. |
-| `data/`, `ingest/` | Phase 2: ingested artifacts and ingest pipeline. Not present yet. |
