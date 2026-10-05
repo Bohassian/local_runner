@@ -1,0 +1,6 @@
+{
+  "defaultProvider": "ollama",
+  "defaultModel": "qwen3.5:9b",
+  "enableInstallTelemetry": false,
+  "lastChangelogVersion": "1.0.2"
+}

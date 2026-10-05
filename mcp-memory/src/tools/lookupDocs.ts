@@ -12,12 +12,12 @@ export const lookupDocsToolDefinition = {
   // Description is directive on purpose: small local models tend to under-call
   // retrieval tools unless told plainly when to use them.
   description:
-    'Retrieve relevant local-doc chunks (Sanity schema, internal packages, ' +
-    'curated reference) by semantic similarity. CALL THIS BEFORE writing any ' +
-    'GROQ query, before referencing internal packages, or whenever you are ' +
-    'about to make a claim about the project schema or internal APIs. ' +
-    'Returns the top-k matching chunks with their source. Prefer calling this ' +
-    'over guessing field names or query shapes.',
+    'Retrieve relevant local-doc chunks (Godot 4 manual + tutorials, curated ' +
+    'reference notes) by semantic similarity. CALL THIS BEFORE writing ' +
+    'GDScript, before referencing any Godot engine class, node, method, ' +
+    'signal, or property, or whenever you are about to make a claim about ' +
+    'Godot APIs or behavior. Returns the top-k matching chunks with their ' +
+    'source. Prefer calling this over guessing API names or signatures.',
   inputSchema: {
     type: 'object',
     properties: {

@@ -8,6 +8,16 @@ services:
       - "${OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama-models:/root/.ollama
+    environment:
+      # Default context window for every model. Ollama's built-in default is
+      # small, and Cline's system prompt + tool defs + retrieved chunks
+      # overflow it silently (front of the prompt gets truncated).
+      OLLAMA_CONTEXT_LENGTH: "${OLLAMA_CONTEXT_LENGTH:-32768}"
+      # Flash attention is required for KV cache quantization; q8_0 roughly
+      # halves KV memory with minimal quality cost.
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: "q8_0"
+    networks: [default, sandbox]
     deploy:
       resources:
         reservations:
@@ -28,7 +38,7 @@ services:
       - ollama-models:/root/.ollama
     environment:
       OLLAMA_HOST: "http://ollama:11434"
-      PRIMARY_MODEL: "${PRIMARY_MODEL:-qwen2.5-coder:7b}"
+      PRIMARY_MODEL: "${PRIMARY_MODEL:-qwen3.5:9b}"
       EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -46,6 +56,11 @@ services:
       context: ./mcp-memory
     container_name: local-runner-mcp-memory
     restart: unless-stopped
+    # Run as the host user so files the server creates in the ./data
+    # bind-mount (sqlite -wal/-shm sidecars) stay writable by the host-side
+    # ingest scripts. As root, they'd come back root-owned and ingest would
+    # fail with SQLITE_READONLY.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     depends_on:
       - ollama
     environment:
@@ -59,6 +74,47 @@ services:
       # Bind-mount host ./data so ingest scripts on the host and the server in
       # the container share the same sqlite-vec DB file.
       - ./data:/app/data
+    networks: [default, sandbox]
+
+  # Sandboxed Pi coding agent. Not started by `compose up` (profile); launch
+  # per project with:
+  #   PI_WORKSPACE=/path/to/project docker compose --profile pi run --rm pi
+  # Sees only PI_WORKSPACE (at /workspace) and its own config in ./pi/agent.
+  # Network: `sandbox` only, which is internal: ollama + mcp-memory reachable,
+  # no internet, no LAN, no host ports.
+  pi:
+    build:
+      context: ./pi
+    image: local-runner-pi:1.0.2
+    profiles: [pi]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    stdin_open: true
+    tty: true
+    depends_on:
+      - ollama
+      - mcp-memory
+    environment:
+      PI_CODING_AGENT_DIR: /pi-agent
+      # Belt and braces: the network already blocks egress.
+      PI_OFFLINE: "1"
+      PI_TELEMETRY: "0"
+      # Throwaway home so nothing Pi or git writes there persists.
+      HOME: /home/pi
+    tmpfs:
+      - /home/pi:mode=1777
+    volumes:
+      # Defaults to an empty placeholder so other compose commands don't fail
+      # when PI_WORKSPACE is unset.
+      - ${PI_WORKSPACE:-./pi/workspace}:/workspace
+      - ./pi/agent:/pi-agent
+    networks: [sandbox]
+
+networks:
+  # Shared with ollama + mcp-memory, which also stay on `default` for egress
+  # (model pulls). `internal` means no gateway: containers attached only to
+  # this network cannot reach anything outside it.
+  sandbox:
+    internal: true
 
 volumes:
   ollama-models:

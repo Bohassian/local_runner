@@ -48,7 +48,7 @@ npx @modelcontextprotocol/inspector http://localhost:3939/mcp
 
 In VS Code:
 1. Install the **Cline** extension.
-2. Cline settings → API provider = Ollama → base URL `http://localhost:11434` → model `qwen2.5-coder:7b`.
+2. Cline settings → API provider = Ollama → base URL `http://localhost:11434` → model `qwen3.5:9b` (or whatever `PRIMARY_MODEL` is in `.env`).
 3. Cline MCP settings → add:
    ```json
    {
@@ -126,6 +126,46 @@ cd ingest && yarn ingest:all          # re-embed
 
 No live filesystem watcher; refresh is manual on purpose.
 
+## Pi (sandboxed) — alternative harness to Cline
+
+[Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `ollama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
+
+Config lives in `pi/agent/` (models → `http://ollama:11434/v1`, MCP → `http://mcp-memory:3939/mcp` with `lookup_docs` exposed directly). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
+
+### One-time
+
+```bash
+docker compose up -d                       # recreates ollama + mcp-memory on the new sandbox network
+docker compose --profile pi build pi       # needs internet once: node image, apt, npm
+```
+
+Add a launcher to `~/.zshrc`:
+
+```zsh
+pibox() {
+  local ws
+  ws="$(realpath "${1:-$PWD}")" || return 1
+  case "$ws" in
+    /|/home|"$HOME") echo "pibox: refusing to mount $ws" >&2; return 1 ;;
+  esac
+  PI_WORKSPACE="$ws" docker compose -f ~/work/unabridged/local_runner/docker-compose.yml --profile pi run --rm pi "${@:2}"
+}
+```
+
+Then `pibox` (current dir) or `pibox ~/work/unabridged/godot_test`. Commit before each session — the mounted folder (including `.git`) is fully writable.
+
+### Verify the sandbox
+
+```bash
+cd ~/work/unabridged/local_runner
+# MCP reachable (want: tools: lookup_docs)
+docker compose --profile pi run --rm pi mcp list
+# Internet blocked (want: blocked: EAI_AGAIN or similar, never LEAK)
+docker compose --profile pi run --rm --entrypoint node pi -e "fetch('https://pi.dev').then(()=>console.log('LEAK'),e=>console.log('blocked:',e.cause?.code))"
+# Ollama reachable (want: {"version":...})
+docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://ollama:11434/api/version').then(r=>r.text()).then(console.log)"
+```
+
 ## Layout
 
 | Path | What |
@@ -134,6 +174,7 @@ No live filesystem watcher; refresh is manual on purpose.
 | `docker-compose.yml` | Ollama + mcp-memory services. |
 | `mcp-memory/` | TypeScript MCP server (HTTP transport). |
 | `ingest/` | Host-side ingest scripts (`tsx`). |
+| `pi/` | Sandboxed Pi image (`Dockerfile`) + its config (`agent/`). |
 | `data/godot-docs/` | Pre-cloned Godot docs (gitignored). |
 | `data/reference/` | User-authored markdown (gitignored). |
 | `data/mcp-memory.db` | sqlite-vec store; bind-mounted into mcp-memory. |
