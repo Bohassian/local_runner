@@ -25,3 +25,12 @@ data/
 .DS_Store
 *.log
 .vscode/
+
+# Pi sandbox: runtime state written into the mounted agent dir
+pi/agent/sessions/
+pi/agent/auth.json
+pi/agent/mcp-auth.json
+pi/agent/models-store.json
+# Default (empty) workspace mount when PI_WORKSPACE is unset
+pi/workspace/*
+!pi/workspace/.gitkeep

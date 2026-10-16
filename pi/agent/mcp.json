@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "memory": {
+      "url": "http://mcp-memory:3939/mcp",
+      "exposure": "direct",
+      "description": "Godot manual + tutorials retrieval (lookup_docs)"
+    }
+  }
+}
