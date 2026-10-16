@@ -1,10 +1,10 @@
 # local_runner
 
-Local-only LLM + MCP setup for using a small model (Cline + Ollama in VS Code) on small projects. Architecture, phasing, and decisions live in `PLAN.md` (local-only, not in source control).
+Local-only LLM + MCP setup for using a small model (Pi + Ollama, sandboxed in Docker) on small projects. Architecture, phasing, and decisions live in `PLAN.md` (local-only, not in source control).
 
 ## Phase 1 — infra smoke test
 
-What this gets you: a running Ollama on your GPU + a stub `mcp-memory` server with a `ping` tool, both reachable from Cline. No real retrieval yet.
+What this gets you: a running Ollama on your GPU + a stub `mcp-memory` server with a `ping` tool, both reachable on localhost. No real retrieval yet. The agent harness is Pi — see [Pi (sandboxed)](#pi-sandboxed) below.
 
 ### Prerequisites (one-time)
 
@@ -43,23 +43,6 @@ curl http://localhost:11434/api/tags
 # mcp-memory ping tool, via the MCP inspector
 npx @modelcontextprotocol/inspector http://localhost:3939/mcp
 ```
-
-### Wire up Cline
-
-In VS Code:
-1. Install the **Cline** extension.
-2. Cline settings → API provider = Ollama → base URL `http://localhost:11434` → model `qwen3.5:9b` (or whatever `PRIMARY_MODEL` is in `.env`).
-3. Cline MCP settings → add:
-   ```json
-   {
-     "mcpServers": {
-       "memory-server": {
-         "url": "http://localhost:3939/mcp"
-       }
-     }
-   }
-   ```
-4. Open any project in VS Code, ask Cline to "call the ping tool from memory with the message 'hello'." Should round-trip.
 
 ## Phase 2 — Godot docs ingestion
 
@@ -112,7 +95,7 @@ Re-running is idempotent: each source's rows are wiped and re-inserted on every 
 # Should now list lookup_docs (not ping):
 npx @modelcontextprotocol/inspector http://localhost:3939/mcp
 
-# Or test from Cline: "Use the lookup_docs tool to find chunks about Node2D input handling."
+# Or test from Pi (`pibox`, see below): "Use the lookup_docs tool to find chunks about Node2D input handling."
 ```
 
 Watch container logs (`docker compose logs -f mcp-memory`) to confirm the model is actually calling the tool. The tool description is directive but small models still sometimes skip it.
@@ -126,7 +109,7 @@ cd ingest && yarn ingest:all          # re-embed
 
 No live filesystem watcher; refresh is manual on purpose.
 
-## Pi (sandboxed) — alternative harness to Cline
+## Pi (sandboxed)
 
 [Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `ollama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
 

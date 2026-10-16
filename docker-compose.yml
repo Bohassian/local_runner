@@ -10,7 +10,7 @@ services:
       - ollama-models:/root/.ollama
     environment:
       # Default context window for every model. Ollama's built-in default is
-      # small, and Cline's system prompt + tool defs + retrieved chunks
+      # small, and Pi's system prompt + tool defs + retrieved chunks
       # overflow it silently (front of the prompt gets truncated).
       OLLAMA_CONTEXT_LENGTH: "${OLLAMA_CONTEXT_LENGTH:-32768}"
       # Flash attention is required for KV cache quantization; q8_0 roughly
