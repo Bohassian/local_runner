@@ -8,6 +8,14 @@
       "llama/qwen3-next-80b-a3b": {
         "reserveTokens": 8192,
         "keepRecentTokens": 32000
+      },
+      "llama/qwen3-coder-next": {
+        "reserveTokens": 8192,
+        "keepRecentTokens": 32000
+      },
+      "llama/qwen3-next-80b-a3b-thinking": {
+        "reserveTokens": 32768,
+        "keepRecentTokens": 32000
       }
     }
   }

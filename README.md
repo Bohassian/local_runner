@@ -115,7 +115,17 @@ No live filesystem watcher; refresh is manual on purpose.
 
 ## llama.cpp (chat model)
 
-Pi's chat model is Qwen3-Next-80B-A3B (Q4_K_M, ~45 GB), served by `llama-server` in the `llama` service. Ollama stays up for `nomic-embed-text` embeddings only. The MoE experts mostly live in system RAM (`--n-cpu-moe`), and attention + shared weights stay on the GPU.
+Pi's chat model is served by `llama-server` in the `llama` service. Ollama stays up for `nomic-embed-text` embeddings only. The MoE experts mostly live in system RAM (`--n-cpu-moe`), and attention + shared weights stay on the GPU.
+
+`LLAMA_PRESET` in `.env` picks the model from `llama/presets/`. All three share the same 80B-A3B architecture (Q4_K_M, ~45 GB each), so memory, speed and tuning carry over:
+
+| Preset | Model | Use |
+|---|---|---|
+| `instruct` | Qwen3-Next-80B-A3B-Instruct | General; no thinking |
+| `coder-next` | Qwen3-Coder-Next | Coding-agent tuned; no thinking |
+| `thinking` | Qwen3-Next-80B-A3B-Thinking | Always thinks first; slower per step, better on hard problems |
+
+Each preset pins its GGUF (repo + revision) and sets that model's recommended sampling. `llama/start.sh` holds the server flags shared by all of them.
 
 `llama` and `llama-pull` are in the `llama` and `pi` profiles, so `docker compose up` won't start them. `pibox` starts them on demand.
 
@@ -123,8 +133,18 @@ Pi's chat model is Qwen3-Next-80B-A3B (Q4_K_M, ~45 GB), served by `llama-server`
 
 ```bash
 docker compose --profile llama build llama-pull     # needs PyPI once
-docker compose --profile llama run --rm llama-pull  # ~45 GB from huggingface.co
+docker compose --profile llama run --rm llama-pull  # current preset, ~45 GB from huggingface.co
+# Pre-fetch another preset without switching to it:
+LLAMA_PRESET=coder-next docker compose --profile llama run --rm llama-pull
 ```
+
+### Switching models
+
+1. Set `LLAMA_PRESET` in `.env`.
+2. `docker compose --profile llama up -d llama` (or just start `pibox`). If that preset isn't downloaded yet, llama-pull fetches it first.
+3. `pibox` starts Pi on the matching model automatically (`--model llama/<ALIAS>`). If you switch presets while Pi is already open, use `/model` in Pi. llama-server ignores the model id in requests, so a mismatch still works, but Pi then uses the wrong entry's settings (thinking display, output limit).
+
+To add a preset, copy one in `llama/presets/`, change the pin, alias and sampling, and add a matching model entry to `pi/agent/models.json`.
 
 ### Run + verify
 
@@ -171,11 +191,17 @@ pibox() {
   case "$ws" in
     /|/home|"$HOME") echo "pibox: refusing to mount $ws" >&2; return 1 ;;
   esac
-  local compose=(docker compose -f ~/work/unabridged/local_runner/docker-compose.yml --profile pi)
+  local root=~/work/unabridged/local_runner
+  local compose=(docker compose -f "$root/docker-compose.yml" --profile pi)
+  # Start Pi on the model matching the running llama preset (LLAMA_PRESET in
+  # .env; Pi's model id is the preset's ALIAS).
+  local preset model
+  preset="$(sed -n 's/^LLAMA_PRESET=//p' "$root/.env" | tail -1)"
+  model="$(sed -n 's/^ALIAS=//p' "$root/llama/presets/${preset:-instruct}.env")" || return 1
   # `always` runs even if the session is interrupted. Stops the whole stack
   # (llama, ollama, mcp-memory), so it also ends any other pibox session.
   {
-    PI_WORKSPACE="$ws" "${compose[@]}" run --rm pi "${@:2}"
+    PI_WORKSPACE="$ws" "${compose[@]}" run --rm pi --model "llama/$model" "${@:2}"
   } always {
     echo "pibox: stopping containers..." >&2
     "${compose[@]}" stop >/dev/null 2>&1
@@ -205,6 +231,7 @@ docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://llam
 |---|---|
 | `PLAN.md` | Architecture + phasing (local-only). |
 | `docker-compose.yml` | Ollama, llama.cpp, mcp-memory + Pi services. |
+| `llama/` | llama-server start script + model presets. |
 | `llama-pull/` | One-shot GGUF downloader image for the llama service. |
 | `mcp-memory/` | TypeScript MCP server (HTTP transport). |
 | `ingest/` | Host-side ingest scripts (`tsx`). |

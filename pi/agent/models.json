@@ -10,6 +10,18 @@
           "contextWindow": 131072,
           "maxTokens": 8192,
           "reasoning": false
+        },
+        {
+          "id": "qwen3-coder-next",
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "reasoning": false
+        },
+        {
+          "id": "qwen3-next-80b-a3b-thinking",
+          "contextWindow": 131072,
+          "maxTokens": 32768,
+          "reasoning": true
         }
       ]
     }

@@ -72,53 +72,16 @@ services:
       - "127.0.0.1:${LLAMA_HOST_PORT:-8080}:8080"
     volumes:
       - llama-models:/models:ro
-    command:
-      - -m
-      - /models/${LLAMA_MODEL_REPO:-unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF}/${LLAMA_MODEL_REVISION:-6688872b7a4e5eb8a121ceea08009530a024ba1d}/${LLAMA_MODEL_FILE:-Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf}
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      # Name Pi sends as the model id (see pi/agent/models.json).
-      - --alias
-      - ${LLAMA_MODEL_ALIAS:-qwen3-next-80b-a3b}
-      # Default CORS reflects any origin, so any web page open in a browser on
-      # this box could read responses from the server. Pi and curl send no
-      # Origin header and are unaffected.
-      - --cors-origins
-      - localhost
-      - -c
-      - "${LLAMA_CONTEXT_LENGTH:-131072}"
-      # One slot: context isn't split across parallel requests, and every Pi
-      # turn reuses the same prompt cache.
-      - -np
-      - "1"
-      # All layers on GPU, then push the MoE experts of the first N layers
-      # back to system RAM. Qwen3-Next has 48 layers; lower N until VRAM is
-      # nearly full (watch nvidia-smi) for more speed.
-      - -ngl
-      - "999"
-      - --n-cpu-moe
-      - "${LLAMA_N_CPU_MOE:-44}"
-      # Same KV setup as Ollama: flash attention + q8_0 cache.
-      - -fa
-      - "on"
-      - --cache-type-k
-      - q8_0
-      - --cache-type-v
-      - q8_0
-      # Use the GGUF's chat template so tool calls come back as structured
-      # `tool_calls` rather than raw <tool_call> text.
-      - --jinja
-      # Qwen's recommended sampling for the Instruct model.
-      - --temp
-      - "0.7"
-      - --top-p
-      - "0.8"
-      - --top-k
-      - "20"
-      - --min-p
-      - "0"
+      - ./llama:/llama:ro
+    # llama/start.sh loads the model preset and holds the server flags.
+    entrypoint: ["/bin/sh", "/llama/start.sh"]
+    environment:
+      # Which model to serve: a file in llama/presets/. Switching to one not
+      # yet downloaded makes llama-pull fetch it (~45 GB) first.
+      LLAMA_PRESET: "${LLAMA_PRESET:-instruct}"
+      LLAMA_CONTEXT_LENGTH: "${LLAMA_CONTEXT_LENGTH:-131072}"
+      # MoE expert layers kept in system RAM (Qwen3-Next family: 48 layers).
+      LLAMA_N_CPU_MOE: "${LLAMA_N_CPU_MOE:-44}"
     networks: [default, sandbox]
     deploy:
       resources:
@@ -128,19 +91,18 @@ services:
               count: all
               capabilities: [gpu]
 
-  # One-shot: downloads the pinned GGUF into the llama-models volume. Skips
-  # without touching the network if the file is already present.
+  # One-shot: downloads the current preset's pinned GGUF into the llama-models
+  # volume. Skips without touching the network if it's already present.
   llama-pull:
     build:
       context: ./llama-pull
-    image: local-runner-llama-pull:1
+    image: local-runner-llama-pull:2
     profiles: [llama, pi]
     volumes:
       - llama-models:/models
+      - ./llama:/llama:ro
     environment:
-      LLAMA_MODEL_REPO: "${LLAMA_MODEL_REPO:-unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF}"
-      LLAMA_MODEL_REVISION: "${LLAMA_MODEL_REVISION:-6688872b7a4e5eb8a121ceea08009530a024ba1d}"
-      LLAMA_MODEL_FILE: "${LLAMA_MODEL_FILE:-Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf}"
+      LLAMA_PRESET: "${LLAMA_PRESET:-instruct}"
     restart: "no"
 
   mcp-memory:
