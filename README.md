@@ -79,7 +79,10 @@ mcp-memory probes Ollama for the embedding model at startup. If `nomic-embed-tex
 
 ### Run ingest
 
+Ingest embeds through Ollama, so it needs to be up (`pibox` stops it on exit).
+
 ```bash
+docker compose up -d ollama
 cd ingest
 yarn ingest:godot        # ~few minutes; depends on GPU + chunk count
 yarn ingest:reference    # near-instant if data/reference/ is empty
@@ -104,6 +107,7 @@ Watch container logs (`docker compose logs -f mcp-memory`) to confirm the model 
 
 ```bash
 git -C data/godot-docs pull           # update upstream docs
+docker compose up -d ollama           # if pibox stopped it
 cd ingest && yarn ingest:all          # re-embed
 ```
 
@@ -143,7 +147,7 @@ curl -s http://localhost:8080/v1/chat/completions -H 'Content-Type: application/
 
 `LLAMA_N_CPU_MOE` (in `.env`) is the main speed knob. Lower it and restart `llama` until `nvidia-smi` shows VRAM nearly full. For speed numbers without Pi in the loop, run `llama-bench` from the full image against the same file.
 
-Stop it when done, since it holds the weights in RAM: `docker compose stop llama`.
+`pibox` stops it when Pi exits. If you started it by hand, stop it when done, since it holds the weights in RAM: `docker compose stop llama`.
 
 ## Pi (sandboxed)
 
@@ -167,11 +171,21 @@ pibox() {
   case "$ws" in
     /|/home|"$HOME") echo "pibox: refusing to mount $ws" >&2; return 1 ;;
   esac
-  PI_WORKSPACE="$ws" docker compose -f ~/work/unabridged/local_runner/docker-compose.yml --profile pi run --rm pi "${@:2}"
+  local compose=(docker compose -f ~/work/unabridged/local_runner/docker-compose.yml --profile pi)
+  # `always` runs even if the session is interrupted. Stops the whole stack
+  # (llama, ollama, mcp-memory), so it also ends any other pibox session.
+  {
+    PI_WORKSPACE="$ws" "${compose[@]}" run --rm pi "${@:2}"
+  } always {
+    echo "pibox: stopping containers..." >&2
+    "${compose[@]}" stop >/dev/null 2>&1
+  }
 }
 ```
 
 Then `pibox` (current dir) or `pibox ~/work/unabridged/godot_test`. Commit before each session — the mounted folder (including `.git`) is fully writable.
+
+Each launch starts llama, ollama and mcp-memory, and exiting Pi stops them all. That frees the ~37 GB of RAM llama holds, but each launch has to reload the model (~10–60 s, depending on whether it's still in the page cache). Running two `pibox` sessions at once doesn't work well: when either exits, the other loses its model server. To stop only llama and leave the small services up, change the cleanup to `stop llama`.
 
 ### Verify the sandbox
 
