@@ -25,6 +25,7 @@ export interface SearchResult {
 }
 
 const CANDIDATES = 50;
+const MAX_PER_PAGE = 2;
 const RRF_K = 60;
 const QUERY_PREFIX = 'search_query: ';
 
@@ -86,8 +87,9 @@ function looksLikeIdentifier(term: string): boolean {
   return /[_.@]/.test(term) || /^.+[A-Z0-9]/.test(term) || /^[A-Z][a-z]+$/.test(term);
 }
 
-// Exact `Class.member` names first (from dotted terms or adjacent term pairs),
-// then bare member or class names.
+// Exact `Class.member` names first (from dotted terms, adjacent term pairs, or
+// a plain-word class name paired with another query word), then class names,
+// then bare member names.
 function symbolIds(db: DocsDb, terms: string[], source?: string): number[] {
   const lc = terms.filter(looksLikeIdentifier).map((t) => t.toLowerCase());
   const full = new Set(lc.filter((t) => t.includes('.')));
@@ -98,6 +100,22 @@ function symbolIds(db: DocsDb, terms: string[], source?: string): number[] {
     `SELECT chunk_id FROM symbols
       WHERE name_lc = @name AND chunk_id IS NOT NULL${sourceFilter('source', source)}`,
   );
+  const isClass = db.prepare<{ name: string; source?: string }, { chunk_id: number }>(
+    `SELECT chunk_id FROM symbols
+      WHERE name_lc = @name AND kind = 'class' AND chunk_id IS NOT NULL${sourceFilter('source', source)}`,
+  );
+
+  // Plain words that name a class ("label", "button") count too, but only as
+  // classes: "text of a label" means Label, plus Label.text when another word
+  // in the query names one of its members. Bare plain words are still kept out
+  // of member matching (see looksLikeIdentifier).
+  const plain = terms.map((t) => t.toLowerCase()).filter((t) => !lc.includes(t));
+  const classWords = plain.filter(
+    (t) => isClass.get({ name: t, ...(source ? { source } : {}) }) !== undefined,
+  );
+  for (const cls of classWords) {
+    for (const other of plain) if (other !== cls) full.add(`${cls}.${other}`);
+  }
   const byMember = db.prepare<{ name: string; source?: string }, { chunk_id: number }>(
     `SELECT chunk_id FROM symbols
       WHERE member_lc = @name AND chunk_id IS NOT NULL${sourceFilter('source', source)}
@@ -107,6 +125,7 @@ function symbolIds(db: DocsDb, terms: string[], source?: string): number[] {
 
   const ids: number[] = [];
   for (const name of full) ids.push(...byName.all(params(name)).map((r) => r.chunk_id));
+  for (const name of classWords) ids.push(...isClass.all(params(name)).map((r) => r.chunk_id));
   for (const name of bare) {
     ids.push(...byName.all(params(name)).map((r) => r.chunk_id));
     ids.push(...byMember.all(params(name)).map((r) => r.chunk_id));
@@ -141,16 +160,26 @@ export async function searchDocs(
     lists.push(symbolIds(db, terms, source));
   }
 
-  const ranked = [...fuse(lists)].sort((a, b) => b[1] - a[1]).slice(0, k);
-  if (ranked.length === 0) return [];
-
   const row = db.prepare<
     [number],
-    Omit<SearchResult, 'score' | 'chunkId'> & { chunkId: number }
+    Omit<SearchResult, 'score' | 'chunkId'> & { chunkId: number; pageId: number }
   >(
-    `SELECT c.id AS chunkId, c.source, p.path, p.title, c.heading, c.anchor, c.text
+    `SELECT c.id AS chunkId, c.page_id AS pageId, c.source, p.path, p.title, c.heading, c.anchor, c.text
        FROM chunks c JOIN pages p ON p.id = c.page_id
       WHERE c.id = ?`,
   );
-  return ranked.map(([id, score]) => ({ ...row.get(id)!, score }));
+
+  // At most MAX_PER_PAGE results from one page, so a single big page (a class
+  // with hundreds of members) can't fill the whole result list.
+  const results: SearchResult[] = [];
+  const perPage = new Map<number, number>();
+  for (const [id, score] of [...fuse(lists)].sort((a, b) => b[1] - a[1])) {
+    const { pageId, ...r } = row.get(id)!;
+    const n = perPage.get(pageId) ?? 0;
+    if (n >= MAX_PER_PAGE) continue;
+    perPage.set(pageId, n + 1);
+    results.push({ ...r, score });
+    if (results.length === k) break;
+  }
+  return results;
 }

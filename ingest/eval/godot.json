@@ -1,5 +1,5 @@
 {
-  "description": "Godot retrieval eval. A query hits if any top-k result comes from one of its `pages` (godot-docs paths). `symbol` is the API name lookup_symbol should resolve (phase 2.5 step 3). Kinds: concept (how-do-I, manual pages), api (class named in the query), api-bare (identifier only), api-implicit (API question in plain English).",
+  "description": "Godot retrieval eval. A query hits if any top-k result comes from one of its `pages` (godot-docs paths). `symbol` is the API name lookup_symbol should resolve (phase 2.5 step 3). Kinds: concept (how-do-I, manual pages), api (class named in the query), api-bare (identifier only), api-implicit (API question in plain English), api-howto (everyday task answered by the class reference; where big settings/server classes tend to intrude).",
   "queries": [
     {
       "kind": "concept",
@@ -250,6 +250,96 @@
         "tutorials/physics/using_area_2d.rst"
       ],
       "symbol": "Area2D.body_entered"
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I make the camera follow the player smoothly?",
+      "pages": [
+        "classes/class_camera2d.rst",
+        "classes/class_camera3d.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I play a sound effect when the player jumps?",
+      "pages": [
+        "classes/class_audiostreamplayer.rst",
+        "classes/class_audiostreamplayer2d.rst",
+        "tutorials/audio/audio_streams.rst",
+        "classes/class_audiostreamplayer3d.rst",
+        "getting_started/first_2d_game/07.finishing-up.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I change the text of a label from code?",
+      "pages": [
+        "classes/class_label.rst",
+        "classes/class_label3d.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I hide a node so it is not drawn?",
+      "pages": [
+        "classes/class_canvasitem.rst",
+        "classes/class_node3d.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I run code when a button is clicked?",
+      "pages": [
+        "classes/class_basebutton.rst",
+        "classes/class_button.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I draw a line in 2D?",
+      "pages": [
+        "classes/class_canvasitem.rst",
+        "classes/class_line2d.rst",
+        "tutorials/2d/custom_drawing_in_2d.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I make an enemy move toward the player?",
+      "pages": [
+        "classes/class_vector2.rst",
+        "classes/class_vector3.rst",
+        "classes/class_characterbody2d.rst",
+        "tutorials/2d/2d_movement.rst",
+        "tutorials/math/vector_math.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I check which bodies are overlapping an area?",
+      "pages": [
+        "classes/class_area2d.rst",
+        "classes/class_area3d.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I start and stop an animation on a sprite?",
+      "pages": [
+        "classes/class_animatedsprite2d.rst",
+        "classes/class_animationplayer.rst",
+        "tutorials/2d/2d_sprite_animation.rst"
+      ]
+    },
+    {
+      "kind": "api-howto",
+      "query": "How do I load a scene and add it as a child at runtime?",
+      "pages": [
+        "classes/class_packedscene.rst",
+        "classes/class_node.rst",
+        "getting_started/step_by_step/instancing.rst",
+        "tutorials/scripting/nodes_and_scene_instances.rst"
+      ]
     }
   ]
 }
