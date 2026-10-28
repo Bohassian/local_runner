@@ -6,19 +6,16 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { EMBEDDING_DIM, openDb } from './store/db.js';
+import { EMBEDDING_DIM, openStore } from './store/docs.js';
 import { createEmbedClient } from './embed/ollama.js';
-import {
-  handleLookupDocs,
-  lookupDocsToolDefinition,
-} from './tools/lookupDocs.js';
+import { DOCS_TOOL_NAMES, docsToolDefinitions, handleDocsTool } from './tools/docs.js';
 
 const PORT = Number.parseInt(process.env.MCP_MEMORY_PORT ?? '3939', 10);
-const DB_PATH = process.env.MCP_MEMORY_DB_PATH ?? '/app/data/mcp-memory.db';
 const EMBED_BASE_URL = process.env.EMBED_BASE_URL ?? 'http://ollama:11434';
 const EMBED_MODEL = process.env.EMBED_MODEL ?? 'nomic-embed-text';
+const DOCS_DB_PATH = process.env.MCP_DOCS_DB_PATH ?? '/app/data/docs.db';
 
-const db = openDb(DB_PATH);
+const docsDb = openStore(DOCS_DB_PATH);
 const embed = createEmbedClient({ baseUrl: EMBED_BASE_URL, model: EMBED_MODEL });
 
 // Probe the embedding model on startup. Fail loud if its dimension doesn't
@@ -30,7 +27,7 @@ const embed = createEmbedClient({ baseUrl: EMBED_BASE_URL, model: EMBED_MODEL })
     throw new Error(
       `Embedding dim mismatch: vec0 declares ${EMBEDDING_DIM}, ` +
         `${EMBED_MODEL} returned ${probe.length}. ` +
-        `Update EMBEDDING_DIM in store/db.ts and re-create the DB.`,
+        `Update EMBEDDING_DIM in store/docs.ts and re-create the DB.`,
     );
   }
   console.log(
@@ -48,15 +45,16 @@ function buildServer(): Server {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [lookupDocsToolDefinition],
+    tools: docsToolDefinitions(docsDb),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args } = req.params;
-    if (name === 'lookup_docs') {
-      return handleLookupDocs(
-        { db, embed },
-        (args ?? {}) as { query?: unknown; k?: unknown },
+    if (DOCS_TOOL_NAMES.has(name)) {
+      return handleDocsTool(
+        { db: docsDb, embed },
+        name,
+        (args ?? {}) as Record<string, unknown>,
       );
     }
     throw new Error(`Unknown tool: ${name}`);
@@ -116,7 +114,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 const shutdown = () => {
   console.log('mcp-memory shutting down');
   httpServer.close(() => {
-    db.close();
+    docsDb.close();
     process.exit(0);
   });
 };

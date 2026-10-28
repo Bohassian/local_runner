@@ -6,7 +6,7 @@
 // Chunks are also hard-capped at 2x the target. Without the cap, one huge
 // paragraph (RST grid tables, long code blocks) produced chunks of 60k+ chars:
 // the embedding model only sees the first 2048 tokens of those, and returning
-// a few of them from lookup_docs would swamp the generator's context window.
+// a few of them from search_docs would swamp the generator's context window.
 
 const CHARS_PER_TOKEN = 4;
 

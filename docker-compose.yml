@@ -119,7 +119,7 @@ services:
       - ollama
     environment:
       MCP_MEMORY_PORT: "3939"
-      MCP_MEMORY_DB_PATH: "/app/data/mcp-memory.db"
+      MCP_DOCS_DB_PATH: "/app/data/docs.db"
       EMBED_BASE_URL: "${EMBED_BASE_URL:-http://ollama:11434}"
       EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
     ports:

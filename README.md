@@ -44,9 +44,15 @@ curl http://localhost:11434/api/tags
 npx @modelcontextprotocol/inspector http://localhost:3939/mcp
 ```
 
-## Phase 2 — Godot docs ingestion
+## Docs lookup (mcp-memory)
 
-Replaces the `ping` tool with a real `lookup_docs(query, k)` tool backed by a `sqlite-vec` index of the Godot manual + tutorials, plus any user-authored markdown you drop in `data/reference/`.
+mcp-memory serves local documentation to Pi through four tools: `list_docs`, `search_docs` (hybrid keyword + semantic search), `lookup_symbol` (exact API names) and `read_doc` (whole pages). The index is `data/docs.db`, built on the host by the ingest scripts from the sources in `ingest/sources.json`:
+
+| Source | What | From |
+|---|---|---|
+| `godot-manual` | Godot 4 manual + tutorials | `data/godot-docs/` (RST) |
+| `godot-api` | Godot 4 class reference, ~27k symbols | `data/godot-docs/classes/` (RST) |
+| `reference` | Your own markdown notes | `data/reference/` (optional) |
 
 ### One-time: clone the Godot docs
 
@@ -59,23 +65,13 @@ git clone --depth 1 https://github.com/godotengine/godot-docs data/godot-docs
 
 ### One-time: install host-side ingest deps
 
-The ingest scripts run on the host (not in Docker) so they can read `data/godot-docs/` directly and re-iterate fast.
+The ingest scripts run on the host (not in Docker) so they can read `data/` directly and re-iterate fast.
 
 ```bash
 cd ingest
 yarn install
 cd ..
 ```
-
-### Rebuild mcp-memory and bring it up
-
-The phase-1 image only has the `ping` tool. Rebuild and restart:
-
-```bash
-docker compose up -d --build mcp-memory
-```
-
-mcp-memory probes Ollama for the embedding model at startup. If `nomic-embed-text` isn't pulled, this fails — `docker compose up -d ollama-pull` first to seed it.
 
 ### Run ingest
 
@@ -84,31 +80,46 @@ Ingest embeds through Ollama, so it needs to be up (`pibox` stops it on exit).
 ```bash
 docker compose up -d ollama
 cd ingest
-yarn ingest:godot        # ~few minutes; depends on GPU + chunk count
-yarn ingest:reference    # near-instant if data/reference/ is empty
-# or both:
-yarn ingest:all
+yarn ingest --all                     # or specific sources: yarn ingest godot-api
 ```
 
-Re-running is idempotent: each source's rows are wiped and re-inserted on every run.
+Roughly 2 minutes for both Godot sources on the 4070. Each run replaces that source's rows entirely, and embeds before writing, so a failed run leaves the previous copy intact.
+
+To add a source, add an entry to `ingest/sources.json` (`format`: `rst`, `godot-classref` or `markdown`; `path` under `data/`; `include` path prefixes) and run `yarn ingest <id>`. The tools pick it up without a restart.
+
+### Rebuild mcp-memory
+
+```bash
+docker compose up -d --build mcp-memory
+```
+
+mcp-memory probes Ollama for the embedding model at startup. If `nomic-embed-text` isn't pulled, this fails — `docker compose up -d ollama-pull` first to seed it.
 
 ### Verify
 
 ```bash
-# Should now list lookup_docs (not ping):
-npx @modelcontextprotocol/inspector http://localhost:3939/mcp
-
-# Or test from Pi (`pibox`, see below): "Use the lookup_docs tool to find chunks about Node2D input handling."
+# Want: list_docs, search_docs, lookup_symbol, read_doc
+docker compose --profile pi run --rm --no-deps pi mcp list
 ```
 
-Watch container logs (`docker compose logs -f mcp-memory`) to confirm the model is actually calling the tool. The tool description is directive but small models still sometimes skip it.
+Or from Pi (`pibox`, see below): "Use lookup_symbol to get the signature of Tween.tween_property." Watch `docker compose logs -f mcp-memory` to confirm the model is actually calling the tools.
+
+### Measure retrieval
+
+`ingest/eval/godot.json` holds 31 Godot questions with their expected pages. `yarn eval` reports hit@5 (right page in the top 5) per question kind for each search mode. Run it after changing readers, chunking or search to see whether retrieval got better or worse.
+
+```bash
+cd ingest
+yarn eval                    # all modes
+yarn eval godot 5 hybrid     # one mode
+```
 
 ### Refresh workflow
 
 ```bash
 git -C data/godot-docs pull           # update upstream docs
 docker compose up -d ollama           # if pibox stopped it
-cd ingest && yarn ingest:all          # re-embed
+cd ingest && yarn ingest --all        # re-embed
 ```
 
 No live filesystem watcher; refresh is manual on purpose.
@@ -159,7 +170,7 @@ Tool-call check: `tool_calls` should be populated and `content` empty. If `conte
 ```bash
 curl -s http://localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{
   "messages": [{"role":"user","content":"How do I handle input in a Node2D? Look it up first."}],
-  "tools": [{"type":"function","function":{"name":"lookup_docs","description":"Retrieve Godot doc chunks. CALL THIS BEFORE writing GDScript.","parameters":{"type":"object","properties":{"query":{"type":"string"},"k":{"type":"integer"}},"required":["query"]}}}]
+  "tools": [{"type":"function","function":{"name":"search_docs","description":"Search local docs. CALL THIS BEFORE writing code against a documented API.","parameters":{"type":"object","properties":{"query":{"type":"string"},"k":{"type":"integer"}},"required":["query"]}}}]
 }' | jq '.choices[0].message | {content, tool_calls}'
 ```
 
@@ -173,7 +184,7 @@ curl -s http://localhost:8080/v1/chat/completions -H 'Content-Type: application/
 
 [Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `llama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
 
-Config lives in `pi/agent/` (models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with `lookup_docs` exposed directly). `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: for a Godot project, copy `pi/templates/godot/AGENTS.md` to its root. Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
+Config lives in `pi/agent/` (models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with the docs tools exposed directly). `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: for a Godot project, copy `pi/templates/godot/AGENTS.md` to its root. Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
 
 ### One-time
 
@@ -217,7 +228,7 @@ Each launch starts llama, ollama and mcp-memory, and exiting Pi stops them all. 
 
 ```bash
 cd ~/work/unabridged/local_runner
-# MCP reachable (want: tools: lookup_docs)
+# MCP reachable (want: list_docs, search_docs, lookup_symbol, read_doc)
 docker compose --profile pi run --rm pi mcp list
 # Internet blocked (want: blocked: EAI_AGAIN or similar, never LEAK)
 docker compose --profile pi run --rm --entrypoint node pi -e "fetch('https://pi.dev').then(()=>console.log('LEAK'),e=>console.log('blocked:',e.cause?.code))"
@@ -234,9 +245,9 @@ docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://llam
 | `llama/` | llama-server start script + model presets. |
 | `llama-pull/` | One-shot GGUF downloader image for the llama service. |
 | `mcp-memory/` | TypeScript MCP server (HTTP transport). |
-| `ingest/` | Host-side ingest scripts (`tsx`). |
+| `ingest/` | Host-side ingest (`yarn ingest`), source registry (`sources.json`) and retrieval eval (`yarn eval`). |
 | `pi/` | Sandboxed Pi image (`Dockerfile`), its config (`agent/`), and per-project `AGENTS.md` templates (`templates/`). |
 | `data/godot-docs/` | Pre-cloned Godot docs (gitignored). |
 | `data/reference/` | User-authored markdown (gitignored). |
-| `data/mcp-memory.db` | sqlite-vec store; bind-mounted into mcp-memory. |
+| `data/docs.db` | Docs store (sqlite-vec + FTS5); bind-mounted into mcp-memory. |
 | `.env.example` | Config knobs; copy to `.env`. |

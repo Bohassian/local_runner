@@ -4,9 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "ingest:godot": "tsx src/godot-docs.ts",
-    "ingest:reference": "tsx src/reference.ts",
-    "ingest:all": "yarn ingest:godot && yarn ingest:reference"
+    "eval": "tsx src/eval.ts",
+    "ingest": "tsx src/ingest-docs.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

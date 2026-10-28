@@ -14,7 +14,7 @@ function required(key: string, fallback?: string): string {
 }
 
 export const env = {
-  dbPath: path.resolve(repoRoot, required('INGEST_DB_PATH', './data/mcp-memory.db')),
+  docsDbPath: path.resolve(repoRoot, required('DOCS_DB_PATH', './data/docs.db')),
   embedBaseUrl: required('INGEST_EMBED_BASE_URL', 'http://localhost:11434'),
   embedModel: required('EMBED_MODEL', 'nomic-embed-text'),
   repoRoot,

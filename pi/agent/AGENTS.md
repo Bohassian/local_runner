@@ -9,17 +9,26 @@
 
 # Local docs lookup
 
-A local documentation index is available through the tool named exactly
-`mcp__memory__lookup_docs` (arguments: `query` string, optional `k` number). It
-currently covers the Godot 4 manual and tutorials plus the user's reference
-notes.
+A local documentation index is available through these tools. Use the full
+names exactly as written:
 
-- Use it before relying on memory for any API it covers. Don't guess names or
-  signatures it could confirm.
-- It is not a general web search. For anything it doesn't cover, read the
+- `mcp__memory__list_docs`: which docs sources exist and what they cover.
+- `mcp__memory__search_docs` (`query`, optional `source`, `k`): search guides
+  and API references. Works for questions and for API names.
+- `mcp__memory__lookup_symbol` (`name`, optional `source`): one API entry by
+  name, e.g. `Class.method`, a bare method name, or a class (which also lists
+  its members).
+- `mcp__memory__read_doc` (`source`, `path`, optional `section`): a whole page
+  or one section, when a result is cut off.
+
+How to use them:
+
+- Before relying on memory for an API these docs cover, confirm it: names and
+  signatures with `lookup_symbol`, behavior and how-tos with `search_docs`.
+- The workspace's `AGENTS.md` may say which sources apply to the project; pass
+  that `source` when it does.
+- This is not a web search. For anything the docs don't cover, read the
   project's own code and docs.
-- Always use the full tool name `mcp__memory__lookup_docs`. There is no tool
-  named `lookup_docs`.
 
 # Editing files
 

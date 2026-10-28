@@ -1,0 +1,31 @@
+{
+  "sources": [
+    {
+      "id": "godot-manual",
+      "name": "Godot manual",
+      "version": "4.x (godot-docs master)",
+      "description": "Godot 4 manual and tutorials: concepts, how-tos, workflows (scenes, signals, physics, input, UI, GDScript language guide).",
+      "format": "rst",
+      "path": "godot-docs",
+      "include": ["getting_started/", "tutorials/"]
+    },
+    {
+      "id": "godot-api",
+      "name": "Godot class reference",
+      "version": "4.x (godot-docs master)",
+      "description": "Godot 4 class reference: every engine class with its methods, properties, signals, constants and theme items. Use for exact API names and signatures.",
+      "format": "godot-classref",
+      "path": "godot-docs",
+      "include": ["classes/"]
+    },
+    {
+      "id": "reference",
+      "name": "Reference notes",
+      "version": "",
+      "description": "User-written markdown notes: project conventions, design notes, cheat sheets.",
+      "format": "markdown",
+      "path": "reference",
+      "include": [""]
+    }
+  ]
+}

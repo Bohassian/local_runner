@@ -5,8 +5,13 @@ project's root as AGENTS.md and add project-specific notes. -->
 
 This is a Godot 4 project.
 
-- Call `mcp__memory__lookup_docs` before writing GDScript or referencing any
-  Godot class, node, method, signal, or property. Do not guess Godot APIs.
+- Docs sources for this project: `godot-api` (class reference) and
+  `godot-manual` (manual and tutorials).
+- Before using any Godot class, method, property, or signal, confirm its exact
+  name and signature with `mcp__memory__lookup_symbol` (source `godot-api`).
+  Do not guess Godot APIs.
+- For how-tos and engine concepts, use `mcp__memory__search_docs` (source
+  `godot-manual`, or no source to search both).
 - Write Godot 4 GDScript, not Godot 3 (e.g. `@export`, `@onready`,
   `signal.connect(callable)`, `super()`).
 - Use static typing (`var speed: float = 200.0`, typed function signatures).
