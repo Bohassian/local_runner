@@ -1,6 +1,14 @@
 {
-  "defaultProvider": "ollama",
-  "defaultModel": "qwen3.5:9b",
+  "defaultProvider": "llama",
+  "defaultModel": "qwen3-next-80b-a3b",
   "enableInstallTelemetry": false,
-  "lastChangelogVersion": "1.0.2"
+  "lastChangelogVersion": "1.0.2",
+  "compaction": {
+    "modelOverrides": {
+      "llama/qwen3-next-80b-a3b": {
+        "reserveTokens": 8192,
+        "keepRecentTokens": 32000
+      }
+    }
+  }
 }

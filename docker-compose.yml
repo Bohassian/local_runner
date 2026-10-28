@@ -9,15 +9,14 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     environment:
-      # Default context window for every model. Ollama's built-in default is
-      # small, and Pi's system prompt + tool defs + retrieved chunks
-      # overflow it silently (front of the prompt gets truncated).
+      # Embeddings only (nomic-embed-text); the chat model is on `llama`.
       OLLAMA_CONTEXT_LENGTH: "${OLLAMA_CONTEXT_LENGTH:-32768}"
       # Flash attention is required for KV cache quantization; q8_0 roughly
       # halves KV memory with minimal quality cost.
       OLLAMA_FLASH_ATTENTION: "1"
       OLLAMA_KV_CACHE_TYPE: "q8_0"
-    networks: [default, sandbox]
+    # Only mcp-memory (on `default`) needs it; Pi talks to `llama`.
+    networks: [default]
     deploy:
       resources:
         reservations:
@@ -26,9 +25,9 @@ services:
               count: all
               capabilities: [gpu]
 
-  # One-shot service: pulls the declared models into the ollama-models volume
-  # on every `compose up`. Pulls are no-ops if the models are already present,
-  # so re-running is cheap. Exits when done. The model list lives in .env.
+  # One-shot service: pulls the embedding model into the ollama-models volume
+  # on every `compose up`. A no-op if it's already present, so re-running is
+  # cheap. Exits when done.
   ollama-pull:
     image: ollama/ollama:0.24.0
     depends_on:
@@ -38,17 +37,110 @@ services:
       - ollama-models:/root/.ollama
     environment:
       OLLAMA_HOST: "http://ollama:11434"
-      PRIMARY_MODEL: "${PRIMARY_MODEL:-qwen3.5:9b}"
       EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
-        echo "Pulling primary model: $$PRIMARY_MODEL"
-        ollama pull "$$PRIMARY_MODEL"
         echo "Pulling embedding model: $$EMBED_MODEL"
         ollama pull "$$EMBED_MODEL"
         echo "Model pulls complete."
+    restart: "no"
+
+  # llama.cpp server for the chat model. Ollama stays for embeddings.
+  # In the `llama` + `pi` profiles so a plain `compose up` doesn't park ~45 GB
+  # of weights in RAM; `pibox` starts it on demand. Stop it when done with:
+  #   sudo docker compose stop llama
+  llama:
+    # Pinned 2026-10-28 to build b11580 (~2026-10-13). Bump deliberately; not
+    # every bNNNN gets an image, so check the tag exists on ghcr.io first.
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11580
+    container_name: local-runner-llama
+    profiles: [llama, pi]
+    restart: "no"
+    # This box is also the daily desktop. Cap llama's memory (weights are
+    # mmapped, so over the cap it slows down rather than taking RAM from
+    # other apps), and make it the kernel's first OOM victim.
+    mem_limit: "${LLAMA_MEM_LIMIT:-42g}"
+    oom_score_adj: 1000
+    depends_on:
+      llama-pull:
+        condition: service_completed_successfully
+    # Localhost only. The server reads a local file and makes no outbound
+    # calls; `default` is here only so the host port can be published.
+    ports:
+      - "127.0.0.1:${LLAMA_HOST_PORT:-8080}:8080"
+    volumes:
+      - llama-models:/models:ro
+    command:
+      - -m
+      - /models/${LLAMA_MODEL_REPO:-unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF}/${LLAMA_MODEL_REVISION:-6688872b7a4e5eb8a121ceea08009530a024ba1d}/${LLAMA_MODEL_FILE:-Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      # Name Pi sends as the model id (see pi/agent/models.json).
+      - --alias
+      - ${LLAMA_MODEL_ALIAS:-qwen3-next-80b-a3b}
+      # Default CORS reflects any origin, so any web page open in a browser on
+      # this box could read responses from the server. Pi and curl send no
+      # Origin header and are unaffected.
+      - --cors-origins
+      - localhost
+      - -c
+      - "${LLAMA_CONTEXT_LENGTH:-131072}"
+      # One slot: context isn't split across parallel requests, and every Pi
+      # turn reuses the same prompt cache.
+      - -np
+      - "1"
+      # All layers on GPU, then push the MoE experts of the first N layers
+      # back to system RAM. Qwen3-Next has 48 layers; lower N until VRAM is
+      # nearly full (watch nvidia-smi) for more speed.
+      - -ngl
+      - "999"
+      - --n-cpu-moe
+      - "${LLAMA_N_CPU_MOE:-44}"
+      # Same KV setup as Ollama: flash attention + q8_0 cache.
+      - -fa
+      - "on"
+      - --cache-type-k
+      - q8_0
+      - --cache-type-v
+      - q8_0
+      # Use the GGUF's chat template so tool calls come back as structured
+      # `tool_calls` rather than raw <tool_call> text.
+      - --jinja
+      # Qwen's recommended sampling for the Instruct model.
+      - --temp
+      - "0.7"
+      - --top-p
+      - "0.8"
+      - --top-k
+      - "20"
+      - --min-p
+      - "0"
+    networks: [default, sandbox]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # One-shot: downloads the pinned GGUF into the llama-models volume. Skips
+  # without touching the network if the file is already present.
+  llama-pull:
+    build:
+      context: ./llama-pull
+    image: local-runner-llama-pull:1
+    profiles: [llama, pi]
+    volumes:
+      - llama-models:/models
+    environment:
+      LLAMA_MODEL_REPO: "${LLAMA_MODEL_REPO:-unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF}"
+      LLAMA_MODEL_REVISION: "${LLAMA_MODEL_REVISION:-6688872b7a4e5eb8a121ceea08009530a024ba1d}"
+      LLAMA_MODEL_FILE: "${LLAMA_MODEL_FILE:-Qwen3-Next-80B-A3B-Instruct-Q4_K_M.gguf}"
     restart: "no"
 
   mcp-memory:
@@ -80,7 +172,7 @@ services:
   # per project with:
   #   PI_WORKSPACE=/path/to/project docker compose --profile pi run --rm pi
   # Sees only PI_WORKSPACE (at /workspace) and its own config in ./pi/agent.
-  # Network: `sandbox` only, which is internal: ollama + mcp-memory reachable,
+  # Network: `sandbox` only, which is internal: llama + mcp-memory reachable,
   # no internet, no LAN, no host ports.
   pi:
     build:
@@ -91,7 +183,7 @@ services:
     stdin_open: true
     tty: true
     depends_on:
-      - ollama
+      - llama
       - mcp-memory
     environment:
       PI_CODING_AGENT_DIR: /pi-agent
@@ -110,11 +202,12 @@ services:
     networks: [sandbox]
 
 networks:
-  # Shared with ollama + mcp-memory, which also stay on `default` for egress
-  # (model pulls). `internal` means no gateway: containers attached only to
+  # Shared with llama + mcp-memory, which also stay on `default` for their
+  # host ports. `internal` means no gateway: containers attached only to
   # this network cannot reach anything outside it.
   sandbox:
     internal: true
 
 volumes:
   ollama-models:
+  llama-models:

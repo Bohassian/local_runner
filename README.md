@@ -109,16 +109,52 @@ cd ingest && yarn ingest:all          # re-embed
 
 No live filesystem watcher; refresh is manual on purpose.
 
-## Pi (sandboxed)
+## llama.cpp (chat model)
 
-[Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `ollama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
+Pi's chat model is Qwen3-Next-80B-A3B (Q4_K_M, ~45 GB), served by `llama-server` in the `llama` service. Ollama stays up for `nomic-embed-text` embeddings only. The MoE experts mostly live in system RAM (`--n-cpu-moe`), and attention + shared weights stay on the GPU.
 
-Config lives in `pi/agent/` (models → `http://ollama:11434/v1`, MCP → `http://mcp-memory:3939/mcp` with `lookup_docs` exposed directly). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
+`llama` and `llama-pull` are in the `llama` and `pi` profiles, so `docker compose up` won't start them. `pibox` starts them on demand.
 
 ### One-time
 
 ```bash
-docker compose up -d                       # recreates ollama + mcp-memory on the new sandbox network
+docker compose --profile llama build llama-pull     # needs PyPI once
+docker compose --profile llama run --rm llama-pull  # ~45 GB from huggingface.co
+```
+
+### Run + verify
+
+```bash
+docker compose --profile llama up -d llama
+docker compose logs -f llama           # wait for "server is listening"
+curl -s http://localhost:8080/health   # want: {"status":"ok"}
+```
+
+Tool-call check: `tool_calls` should be populated and `content` empty. If `content` contains raw `<tool_call>` text instead, the chat template isn't being parsed.
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "messages": [{"role":"user","content":"How do I handle input in a Node2D? Look it up first."}],
+  "tools": [{"type":"function","function":{"name":"lookup_docs","description":"Retrieve Godot doc chunks. CALL THIS BEFORE writing GDScript.","parameters":{"type":"object","properties":{"query":{"type":"string"},"k":{"type":"integer"}},"required":["query"]}}}]
+}' | jq '.choices[0].message | {content, tool_calls}'
+```
+
+### Tuning
+
+`LLAMA_N_CPU_MOE` (in `.env`) is the main speed knob. Lower it and restart `llama` until `nvidia-smi` shows VRAM nearly full. For speed numbers without Pi in the loop, run `llama-bench` from the full image against the same file.
+
+Stop it when done, since it holds the weights in RAM: `docker compose stop llama`.
+
+## Pi (sandboxed)
+
+[Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `llama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
+
+Config lives in `pi/agent/` (models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with `lookup_docs` exposed directly). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
+
+### One-time
+
+```bash
+docker compose up -d                       # recreates ollama + mcp-memory
 docker compose --profile pi build pi       # needs internet once: node image, apt, npm
 ```
 
@@ -145,8 +181,8 @@ cd ~/work/unabridged/local_runner
 docker compose --profile pi run --rm pi mcp list
 # Internet blocked (want: blocked: EAI_AGAIN or similar, never LEAK)
 docker compose --profile pi run --rm --entrypoint node pi -e "fetch('https://pi.dev').then(()=>console.log('LEAK'),e=>console.log('blocked:',e.cause?.code))"
-# Ollama reachable (want: {"version":...})
-docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://ollama:11434/api/version').then(r=>r.text()).then(console.log)"
+# llama reachable (want: {"status":"ok"})
+docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://llama:8080/health').then(r=>r.text()).then(console.log)"
 ```
 
 ## Layout
@@ -154,7 +190,8 @@ docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://olla
 | Path | What |
 |---|---|
 | `PLAN.md` | Architecture + phasing (local-only). |
-| `docker-compose.yml` | Ollama + mcp-memory services. |
+| `docker-compose.yml` | Ollama, llama.cpp, mcp-memory + Pi services. |
+| `llama-pull/` | One-shot GGUF downloader image for the llama service. |
 | `mcp-memory/` | TypeScript MCP server (HTTP transport). |
 | `ingest/` | Host-side ingest scripts (`tsx`). |
 | `pi/` | Sandboxed Pi image (`Dockerfile`) + its config (`agent/`). |

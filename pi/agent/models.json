@@ -1,10 +1,17 @@
 {
   "providers": {
-    "ollama": {
-      "baseUrl": "http://ollama:11434/v1",
+    "llama": {
+      "baseUrl": "http://llama:8080/v1",
       "api": "openai-completions",
-      "apiKey": "ollama",
-      "models": [{ "id": "qwen3.5:9b" }]
+      "apiKey": "llama",
+      "models": [
+        {
+          "id": "qwen3-next-80b-a3b",
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "reasoning": false
+        }
+      ]
     }
   }
 }
