@@ -173,7 +173,7 @@ curl -s http://localhost:8080/v1/chat/completions -H 'Content-Type: application/
 
 [Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `llama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
 
-Config lives in `pi/agent/` (models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with `lookup_docs` exposed directly). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
+Config lives in `pi/agent/` (models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with `lookup_docs` exposed directly). `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: for a Godot project, copy `pi/templates/godot/AGENTS.md` to its root. Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
 
 ### One-time
 
@@ -235,7 +235,7 @@ docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://llam
 | `llama-pull/` | One-shot GGUF downloader image for the llama service. |
 | `mcp-memory/` | TypeScript MCP server (HTTP transport). |
 | `ingest/` | Host-side ingest scripts (`tsx`). |
-| `pi/` | Sandboxed Pi image (`Dockerfile`) + its config (`agent/`). |
+| `pi/` | Sandboxed Pi image (`Dockerfile`), its config (`agent/`), and per-project `AGENTS.md` templates (`templates/`). |
 | `data/godot-docs/` | Pre-cloned Godot docs (gitignored). |
 | `data/reference/` | User-authored markdown (gitignored). |
 | `data/mcp-memory.db` | sqlite-vec store; bind-mounted into mcp-memory. |
