@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 build-essential ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable
-
+# Yarn is the image's bundled classic release (1.22.22 in node:24-bookworm-slim
+# as of 2026-10-30), matching the host. No corepack, so the build doesn't
+# download a package manager.
 COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile
 
@@ -21,7 +22,6 @@ RUN yarn build
 
 FROM node:24-bookworm-slim AS runner
 WORKDIR /app
-RUN corepack enable
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
