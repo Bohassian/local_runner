@@ -1,5 +1,5 @@
 # Sandboxed Pi coding agent. Runs on the compose `sandbox` network, which is
-# internal (no route off the host): it can reach ollama and mcp-memory and
+# internal (no route off the host): it can reach llama and mcp-memory and
 # nothing else. Only the project folder in PI_WORKSPACE is mounted.
 FROM node:24-bookworm-slim
 

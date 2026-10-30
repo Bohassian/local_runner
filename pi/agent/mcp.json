@@ -3,7 +3,7 @@
     "memory": {
       "url": "http://mcp-memory:3939/mcp",
       "exposure": "direct",
-      "description": "Godot manual + tutorials retrieval (lookup_docs)"
+      "description": "Local docs and API lookup (list_docs, search_docs, lookup_symbol, read_doc)"
     }
   }
 }
