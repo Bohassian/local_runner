@@ -1,0 +1,5 @@
+# Only what the Dockerfile copies. Keeps agent config and session
+# transcripts out of the build context.
+*
+!package.json
+!package-lock.json

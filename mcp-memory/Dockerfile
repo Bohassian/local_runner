@@ -1,6 +1,6 @@
 # Multi-stage. Bookworm-slim (not alpine) because better-sqlite3 has reliable
 # prebuilt binaries for glibc x64; alpine/musl often forces a from-source build.
-FROM node:24-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS base
 WORKDIR /app
 
 # Build tools as a fallback in case the prebuilt better-sqlite3 binary doesn't
@@ -14,6 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # as of 2026-10-30), matching the host. No corepack, so the build doesn't
 # download a package manager.
 COPY package.json yarn.lock ./
+
+# Runtime dependencies only, for the final image (no tsc, tsx, esbuild).
+FROM base AS deps
+RUN yarn install --frozen-lockfile --production
+
+FROM base AS builder
 RUN yarn install --frozen-lockfile
 
 COPY tsconfig.json ./
@@ -22,7 +28,7 @@ RUN yarn build
 
 FROM node:24-bookworm-slim AS runner
 WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
 EXPOSE 3939

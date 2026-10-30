@@ -11,7 +11,7 @@ Local-only LLM + MCP setup for coding with the [Pi](https://pi.dev) agent, sandb
 
 Setup order: [prerequisites](#prerequisites) → [base services](#base-services-ollama--mcp-memory) → [chat model](#llamacpp-chat-model) → [docs](#docs-lookup-mcp-memory) → [Pi](#pi-sandboxed).
 
-Commands assume your user can run `docker`. If it can't, prefix them with `sudo` (including inside the `pibox` function below).
+Every published port is bound to 127.0.0.1, so nothing is reachable from the LAN. Commands assume your user can run `docker`. If it can't, prefix them with `sudo` (including inside the `pibox` function below).
 
 ## Prerequisites
 
@@ -46,7 +46,7 @@ mcp-memory probes Ollama for the embedding model at startup and exits if it's mi
 
 ```bash
 curl http://localhost:11434/api/tags                       # Ollama answers, lists nomic-embed-text
-npx @modelcontextprotocol/inspector http://localhost:3939/mcp   # optional: poke the tools by hand
+npx @modelcontextprotocol/inspector@0.21.2 http://localhost:3939/mcp   # optional: poke the tools by hand (pinned: <0.14.1 has an unauthenticated RCE)
 ```
 
 ## llama.cpp (chat model)
@@ -134,7 +134,7 @@ Pi's docs ship inside the npm package, so they're copied out of the built Pi ima
 
 ```bash
 mkdir -p data/pi-docs && docker compose --profile pi run --rm --no-deps -T --entrypoint sh pi \
-  -c 'cd "$(npm root -g)/@earendil-works/pi-coding-agent" && tar -cf - README.md docs' | tar -x -C data/pi-docs
+  -c 'cd /opt/pi/node_modules/@earendil-works/pi-coding-agent && tar -cf - README.md docs' | tar -x -C data/pi-docs
 ```
 
 The clone and `fetch-docs` are the only networked steps for docs; ingest and search read local files. `fetch-docs` re-downloads only bundles that changed upstream. Other DevDocs slugs are listed at https://devdocs.io/docs.json (e.g. `react`, `typescript`, `postgresql~16`).
@@ -184,7 +184,7 @@ yarn fetch-docs rails~7.1 ruby~3.2 rails~8.1 ruby~4.0   # update DevDocs bundles
 yarn ingest --all                     # re-embed
 ```
 
-After bumping `PI_VERSION`, rebuild the Pi image, delete `data/pi-docs/`, repeat the copy above and run `yarn ingest pi`, so the `pi` source matches the Pi you run (also update its `version` in `ingest/sources.json`).
+After bumping Pi (see [Pi](#pi-sandboxed)), rebuild the Pi image, delete `data/pi-docs/`, repeat the copy above and run `yarn ingest pi`, so the `pi` source matches the Pi you run (also update its `version` in `ingest/sources.json`).
 
 No live filesystem watcher; refresh is manual on purpose.
 
@@ -192,12 +192,19 @@ No live filesystem watcher; refresh is manual on purpose.
 
 [Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `llama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
 
-Config lives in `pi/agent/`: models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with the docs tools exposed directly. `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: copy `pi/templates/godot/AGENTS.md` or `pi/templates/rails/AGENTS.md` to the project's root (for Rails, set the versions and sources to match the app). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately, and refresh the `pi` docs source when you do (see [Refresh](#refresh)).
+Config lives in `pi/agent/`: models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with the docs tools exposed directly. `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: copy `pi/templates/godot/AGENTS.md` or `pi/templates/rails/AGENTS.md` to the project's root (for Rails, set the versions and sources to match the app). `pi/agent/` is mounted read-write so you can customize Pi from inside it (the `pi` docs source covers settings, extensions and skills). Anything written there loads in every project without a trust prompt, so review changes to it like code (`git diff pi/agent`). `pibox` keeps each project's sessions in its own `pi/sessions/<name>-<hash>/` (gitignored); without `pibox` they land in `pi/agent/sessions/`.
+
+The image pins `@earendil-works/pi-coding-agent@1.0.2` in `pi/package.json`, with the full dependency tree and integrity hashes in `pi/package-lock.json` (`npm ci` installs exactly that). To bump it deliberately, change the version, regenerate the lockfile (needs the npm registry), rebuild, and refresh the `pi` docs source (see [Refresh](#refresh)):
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD/pi:/w" -w /w \
+  node:24-bookworm-slim npm install --package-lock-only --ignore-scripts
+```
 
 ### One-time
 
 ```bash
-docker compose --profile pi build pi       # needs internet once: node image, apt, npm
+docker compose --profile pi build pi       # needs internet once: node image, apt, npm (from pi/package-lock.json)
 ```
 
 Add a launcher to your shell config (`~/.zshrc`; it uses zsh's `always` block). Set `root` to where you cloned this repo:
@@ -213,13 +220,28 @@ pibox() {
   local compose=(docker compose -f "$root/docker-compose.yml" --profile pi)
   # Start Pi on the model matching the running llama preset (LLAMA_PRESET in
   # .env; Pi's model id is the preset's ALIAS).
+  # .git is mounted read-only: hooks or a core.fsmonitor the agent left in
+  # there would run on the host the next time you ran git. No .git means
+  # Docker would create a root-owned one, so require a repo.
+  if [[ ! -e "$ws/.git" ]]; then
+    echo "pibox: $ws is not a git repo; git init and commit first" >&2
+    return 1
+  fi
+  # Sessions per project, so one project's transcripts never show up in
+  # another's /resume. All projects are /workspace inside the container.
+  local sessions="$root/pi/sessions/${ws:t}-$(print -rn -- "$ws" | sha256sum | cut -c1-8)"
+  mkdir -p "$sessions" || return 1
+  local mounts=(
+    -v "$ws/.git:/workspace/.git:ro"
+    -v "$sessions:/pi-sessions" -e PI_CODING_AGENT_SESSION_DIR=/pi-sessions
+  )
   local preset model
   preset="$(sed -n 's/^LLAMA_PRESET=//p' "$root/.env" | tail -1)"
   model="$(sed -n 's/^ALIAS=//p' "$root/llama/presets/${preset:-instruct}.env")" || return 1
   # `always` runs even if the session is interrupted. Stops the whole stack
   # (llama, ollama, mcp-memory), so it also ends any other pibox session.
   {
-    PI_WORKSPACE="$ws" "${compose[@]}" run --rm pi --model "llama/$model" "${@:2}"
+    PI_WORKSPACE="$ws" "${compose[@]}" run --rm "${mounts[@]}" pi --model "llama/$model" "${@:2}"
   } always {
     echo "pibox: stopping containers..." >&2
     "${compose[@]}" stop >/dev/null 2>&1
@@ -227,7 +249,7 @@ pibox() {
 }
 ```
 
-Then `pibox` (current dir) or `pibox /path/to/project`. Extra arguments go to Pi. Commit before each session — the mounted folder (including `.git`) is fully writable.
+Then `pibox` (current dir) or `pibox /path/to/project`. Extra arguments go to Pi. Commit before each session. The working tree is fully writable, but `.git` is read-only, so the agent can't commit or plant git hooks. Still review the diff before running anything it touched: files your tools execute (`package.json` scripts, `Makefile`, `.envrc`, `.vscode/tasks.json`, a nested repo's `.git/hooks`) run on the host.
 
 Each launch starts llama, ollama and mcp-memory, and exiting Pi stops them all. That frees the ~37 GB of RAM llama holds, but each launch has to reload the model (~10–60 s, depending on whether it's still in the page cache). Running two `pibox` sessions at once doesn't work well: when either exits, the other loses its model server. To stop only llama and leave the small services up, change the cleanup to `stop llama`.
 
@@ -240,8 +262,18 @@ From the repo root:
 docker compose --profile pi run --rm pi mcp list
 # Internet blocked (want: blocked: EAI_AGAIN or similar, never LEAK)
 docker compose --profile pi run --rm --entrypoint node pi -e "fetch('https://pi.dev').then(()=>console.log('LEAK'),e=>console.log('blocked:',e.cause?.code))"
+# No route out by IP either, bypassing DNS (want: blocked: ENETUNREACH or similar, never LEAK)
+docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://1.1.1.1').then(()=>console.log('LEAK'),e=>console.log('blocked:',e.cause?.code))"
 # llama reachable (want: {"status":"ok"})
 docker compose --profile pi run --rm --entrypoint node pi -e "fetch('http://llama:8080/health').then(r=>r.text()).then(console.log)"
+# Host has no address on the sandbox bridge (inhibit_ipv4), so there's no gateway for
+# containers to reach host services through (want: no output)
+id="$(docker network inspect local_runner_sandbox -f '{{.Id}}')"
+ip -4 -o addr show "br-${id:0:12}"
+# Host's other addresses unroutable (want: blocked: ENETUNREACH for each, never HOST REACHABLE).
+# Needs a listener on all interfaces, since the published ports are 127.0.0.1 only:
+# run `python3 -m http.server 8999 --bind 0.0.0.0` in another terminal first.
+docker compose --profile pi run --rm --entrypoint node pi -e "for (const h of process.argv.slice(1)) fetch('http://'+h+':8999/',{signal:AbortSignal.timeout(5000)}).then(()=>console.log(h,'HOST REACHABLE'),e=>console.log(h,'blocked:',e.cause?.code ?? e.name))" 172.17.0.1 "$(hostname -I | awk '{print $1}')"
 ```
 
 ## Layout

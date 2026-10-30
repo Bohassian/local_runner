@@ -4,8 +4,10 @@ services:
     image: ollama/ollama:0.24.0
     container_name: local-runner-ollama
     restart: unless-stopped
+    # Localhost only: Ollama has no auth, and Docker's port publishing
+    # bypasses ufw. The host-side ingest scripts use this port.
     ports:
-      - "${OLLAMA_HOST_PORT:-11434}:11434"
+      - "127.0.0.1:${OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama-models:/root/.ollama
     environment:
@@ -79,6 +81,11 @@ services:
       - ./llama:/llama:ro
     # llama/start.sh loads the model preset and holds the server flags.
     entrypoint: ["/bin/sh", "/llama/start.sh"]
+    # Pi can send it anything, and it has a route out via `default`. Still
+    # root (owns the model files) but with no capabilities.
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 512
     environment:
       # Which model to serve: a file in llama/presets/. Switching to one not
       # yet downloaded makes llama-pull fetch it (~45 GB) first.
@@ -126,24 +133,35 @@ services:
       MCP_DOCS_DB_PATH: "/app/data/docs.db"
       EMBED_BASE_URL: "${EMBED_BASE_URL:-http://ollama:11434}"
       EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text:v1.5}"
+      # Accepted in the Host header alongside mcp-memory:3939 (DNS rebinding
+      # check in src/index.ts).
+      MCP_MEMORY_HOST_PORT: "${MCP_MEMORY_PORT:-3939}"
     ports:
-      - "${MCP_MEMORY_PORT:-3939}:3939"
+      - "127.0.0.1:${MCP_MEMORY_PORT:-3939}:3939"
     volumes:
       # Bind-mount host ./data so ingest scripts on the host and the server in
       # the container share the same sqlite-vec DB file.
       - ./data:/app/data
+    # Reachable from the sandbox and from `default`, so keep it small.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 512
     networks: [default, sandbox]
 
   # Sandboxed Pi coding agent. Not started by `compose up` (profile); launch
   # per project with:
   #   PI_WORKSPACE=/path/to/project docker compose --profile pi run --rm pi
   # Sees only PI_WORKSPACE (at /workspace) and its own config in ./pi/agent.
+  # pibox adds the per-project mounts: .git read-only and the session dir.
   # Network: `sandbox` only, which is internal: llama + mcp-memory reachable,
   # no internet, no LAN, no host ports.
   pi:
     build:
       context: ./pi
-    image: local-runner-pi:1.0.2
+    image: local-runner-pi:1.0.2-2
     profiles: [pi]
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     stdin_open: true
@@ -164,15 +182,25 @@ services:
       # Defaults to an empty placeholder so other compose commands don't fail
       # when PI_WORKSPACE is unset.
       - ${PI_WORKSPACE:-./pi/workspace}:/workspace
+      # Read-write so Pi can be customized from inside the sandbox
+      # (settings, extensions, skills). Review changes here like code: Pi
+      # loads them in every project without a trust prompt.
       - ./pi/agent:/pi-agent
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 512
     networks: [sandbox]
 
 networks:
   # Shared with llama + mcp-memory, which also stay on `default` for their
-  # host ports. `internal` means no gateway: containers attached only to
-  # this network cannot reach anything outside it.
+  # host ports. `internal` means no route off the bridge, but the host still
+  # holds the bridge's gateway IP, so containers here could reach any host
+  # service listening on 0.0.0.0 (verified 2026-10-30, Docker 29.9.2).
+  # inhibit_ipv4 leaves the host without an address on this bridge.
   sandbox:
     internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
 
 volumes:
   ollama-models:

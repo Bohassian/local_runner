@@ -54,8 +54,9 @@ How to use them:
 
 # Git
 
-- The workspace, including `.git`, is writable. Read-only git (`status`,
-  `diff`, `log`, `show`) is fine.
+- The workspace is writable, but `.git` is mounted read-only. Read-only git
+  (`status`, `diff`, `log`, `show`) works; anything that writes to `.git`
+  fails.
 - Do not commit, push, reset, rebase, stash, or check out over changes unless
   the user asks. The user reviews and commits changes themselves.
 

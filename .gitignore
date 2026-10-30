@@ -26,7 +26,9 @@ data/
 *.log
 .vscode/
 
-# Pi sandbox: runtime state written into the mounted agent dir
+# Pi sandbox: per-project session transcripts (pibox), plus runtime state
+# written into the mounted agent dir
+pi/sessions/
 pi/agent/sessions/
 pi/agent/auth.json
 pi/agent/mcp-auth.json

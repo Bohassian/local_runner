@@ -14,6 +14,17 @@ const PORT = Number.parseInt(process.env.MCP_MEMORY_PORT ?? '3939', 10);
 const EMBED_BASE_URL = process.env.EMBED_BASE_URL ?? 'http://ollama:11434';
 const EMBED_MODEL = process.env.EMBED_MODEL ?? 'nomic-embed-text:v1.5';
 const DOCS_DB_PATH = process.env.MCP_DOCS_DB_PATH ?? '/app/data/docs.db';
+const HOST_PORT = process.env.MCP_MEMORY_HOST_PORT ?? String(PORT);
+
+// DNS rebinding guard (the MCP spec requires one for HTTP servers): a web page
+// that rebinds its own hostname to this box would send its hostname as Host,
+// and a browser always sends Origin on cross-site and POST requests. Pi and
+// curl send no Origin, so any request carrying one is refused.
+const ALLOWED_HOSTS = new Set([
+  `mcp-memory:${PORT}`,
+  `localhost:${HOST_PORT}`,
+  `127.0.0.1:${HOST_PORT}`,
+]);
 
 const docsDb = openStore(DOCS_DB_PATH);
 const embed = createEmbedClient({ baseUrl: EMBED_BASE_URL, model: EMBED_MODEL });
@@ -78,6 +89,12 @@ const transports = new Map<string, StreamableHTTPServerTransport>();
 const httpServer = http.createServer(async (req, res) => {
   if (req.url !== '/mcp') {
     res.statusCode = 404;
+    res.end();
+    return;
+  }
+  if (!ALLOWED_HOSTS.has(req.headers.host ?? '') || req.headers.origin !== undefined) {
+    console.log(`mcp-memory: refused host=${req.headers.host} origin=${req.headers.origin}`);
+    res.statusCode = 403;
     res.end();
     return;
   }

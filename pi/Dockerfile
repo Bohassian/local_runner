@@ -9,11 +9,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && ln -s /usr/bin/fdfind /usr/local/bin/fd \
   && rm -rf /var/lib/apt/lists/*
 
-# Pinned. Reviewed 2026-10-04 (1.0.2). Bump deliberately after re-reviewing.
+# Pi's version is pinned in package.json (reviewed 2026-10-04, 1.0.2) and its
+# whole dependency tree, with integrity hashes, in package-lock.json. Bump
+# deliberately after re-reviewing, and regenerate the lockfile (README).
 # --ignore-scripts matches Pi's own containerization docs; none of the
 # dependency install scripts are needed at runtime.
-ARG PI_VERSION=1.0.2
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION}
+WORKDIR /opt/pi
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --omit=dev
+ENV PATH=/opt/pi/node_modules/.bin:$PATH
 
 WORKDIR /workspace
 ENTRYPOINT ["pi"]
