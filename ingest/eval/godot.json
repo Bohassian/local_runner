@@ -1,5 +1,6 @@
 {
-  "description": "Godot retrieval eval. A query hits if any top-k result comes from one of its `pages` (godot-docs paths). `symbol` is the API name lookup_symbol should resolve (phase 2.5 step 3). Kinds: concept (how-do-I, manual pages), api (class named in the query), api-bare (identifier only), api-implicit (API question in plain English), api-howto (everyday task answered by the class reference; where big settings/server classes tend to intrude).",
+  "description": "Godot retrieval eval (searches limited to godot-manual + godot-api, as a project's AGENTS.md would). A query hits if any top-k result comes from one of its `pages` (godot-docs paths). `symbol` is the API name lookup_symbol should resolve (phase 2.5 step 3). Kinds: concept (how-do-I, manual pages), api (class named in the query), api-bare (identifier only), api-implicit (API question in plain English), api-howto (everyday task answered by the class reference; where big settings/server classes tend to intrude).",
+  "sources": ["godot-manual", "godot-api"],
   "queries": [
     {
       "kind": "concept",

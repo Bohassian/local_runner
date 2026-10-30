@@ -133,9 +133,11 @@ function symbolIds(db: DocsDb, terms: string[], sources: string[]): number[] {
   const byName = db.prepare<Record<string, unknown>, { chunk_id: number }>(
     `SELECT chunk_id FROM symbols WHERE name_lc = @name AND chunk_id IS NOT NULL${filter}`,
   );
+  // A word also names Godot's 2D/3D pair: "camera" -> Camera2D, Camera3D.
   const classes = db.prepare<Record<string, unknown>, { chunk_id: number; name_lc: string }>(
     `SELECT chunk_id, name_lc FROM symbols
-      WHERE kind = 'class' AND (name_lc = @name OR name_lc LIKE '%::' || @name)
+      WHERE kind = 'class'
+        AND (name_lc IN (@name, @name || '2d', @name || '3d') OR name_lc LIKE '%::' || @name)
         AND chunk_id IS NOT NULL${filter}
       LIMIT 10`,
   );

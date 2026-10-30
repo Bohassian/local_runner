@@ -29,8 +29,10 @@ const k = Number.parseInt(process.argv[3] ?? '5', 10);
 const modes = process.argv[4] ? [process.argv[4] as SearchMode] : MODES;
 
 const evalPath = path.join(env.repoRoot, 'ingest', 'eval', `${set}.json`);
-const { queries } = JSON.parse(fs.readFileSync(evalPath, 'utf8')) as {
+// `sources` at the top level is the default for queries that don't set their own.
+const { queries, sources: defaultSources } = JSON.parse(fs.readFileSync(evalPath, 'utf8')) as {
   queries: EvalQuery[];
+  sources?: string[];
 };
 
 const embed = createEmbedClient({ baseUrl: env.embedBaseUrl, model: env.embedModel });
@@ -66,7 +68,7 @@ for (const mode of modes) {
   let noise = 0;
 
   for (const q of queries) {
-    const got = (await searchDocs(store, embed, q.query, { k, mode, sources: q.sources })).map(
+    const got = (await searchDocs(store, embed, q.query, { k, mode, sources: q.sources ?? defaultSources })).map(
       (r) => r.path,
     );
     // Reciprocal rank of the first result from an expected page (0 if none).
