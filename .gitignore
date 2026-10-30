@@ -33,6 +33,7 @@ pi/agent/sessions/
 pi/agent/auth.json
 pi/agent/mcp-auth.json
 pi/agent/models-store.json
+pi/agent/skills/
 # Default (empty) workspace mount when PI_WORKSPACE is unset
 pi/workspace/*
 !pi/workspace/.gitkeep
