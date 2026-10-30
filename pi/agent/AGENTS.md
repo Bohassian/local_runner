@@ -27,6 +27,8 @@ How to use them:
   signatures with `lookup_symbol`, behavior and how-tos with `search_docs`.
 - The workspace's `AGENTS.md` may say which sources apply to the project; pass
   them as `sources` when it does, so results match the project's versions.
+- For questions about Pi itself (settings, `AGENTS.md`, skills, prompt
+  templates, extensions, providers and models), search the `pi` source.
 - This is not a web search. For anything the docs don't cover, read the
   project's own code and docs.
 

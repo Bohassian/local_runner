@@ -35,6 +35,17 @@
       ]
     },
     {
+      "id": "pi",
+      "name": "Pi coding agent",
+      "version": "1.0.2 (docs copied from the pinned pi image)",
+      "description": "Pi (the coding agent harness) docs: configuration, settings, AGENTS.md, skills, prompt templates, extensions, providers and models, MCP, sessions, CLI and SDK.",
+      "format": "markdown",
+      "path": "pi-docs",
+      "include": [
+        ""
+      ]
+    },
+    {
       "id": "rails~7.1",
       "name": "Ruby on Rails 7.1",
       "version": "",

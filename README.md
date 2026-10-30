@@ -115,6 +115,7 @@ mcp-memory serves local documentation to Pi through four tools: `list_docs`, `se
 | `godot-api` | Godot 4 class reference, ~27k symbols | `data/godot-docs/classes/` (RST) |
 | `rails~7.1`, `rails~8.1` | Rails API reference + Rails Guides | `data/devdocs/` (DevDocs bundles) |
 | `ruby~3.2`, `ruby~4.0` | Ruby core + standard library | `data/devdocs/` (DevDocs bundles) |
+| `pi` | Pi's own docs (settings, skills, extensions, providers, ...) | `data/pi-docs/` (markdown, copied from the Pi image) |
 | `reference` | Your own markdown notes | `data/reference/` (optional) |
 
 Several versions of a stack coexist. Each project's `AGENTS.md` names the sources matching its versions, and Pi passes them as `sources` (templates in `pi/templates/`).
@@ -129,7 +130,14 @@ git clone --depth 1 https://github.com/godotengine/godot-docs data/godot-docs
 cd ingest && yarn install && yarn fetch-docs rails~7.1 ruby~3.2 rails~8.1 ruby~4.0
 ```
 
-These are the only networked steps for docs; ingest and search read local files. `fetch-docs` re-downloads only bundles that changed upstream. Other DevDocs slugs are listed at https://devdocs.io/docs.json (e.g. `react`, `typescript`, `postgresql~16`).
+Pi's docs ship inside the npm package, so they're copied out of the built Pi image (no network; build it first, see [Pi](#pi-sandboxed)):
+
+```bash
+mkdir -p data/pi-docs && docker compose --profile pi run --rm --no-deps -T --entrypoint sh pi \
+  -c 'cd "$(npm root -g)/@earendil-works/pi-coding-agent" && tar -cf - README.md docs' | tar -x -C data/pi-docs
+```
+
+The clone and `fetch-docs` are the only networked steps for docs; ingest and search read local files. `fetch-docs` re-downloads only bundles that changed upstream. Other DevDocs slugs are listed at https://devdocs.io/docs.json (e.g. `react`, `typescript`, `postgresql~16`).
 
 ### Run ingest
 
@@ -176,13 +184,15 @@ yarn fetch-docs rails~7.1 ruby~3.2 rails~8.1 ruby~4.0   # update DevDocs bundles
 yarn ingest --all                     # re-embed
 ```
 
+After bumping `PI_VERSION`, rebuild the Pi image, delete `data/pi-docs/`, repeat the copy above and run `yarn ingest pi`, so the `pi` source matches the Pi you run (also update its `version` in `ingest/sources.json`).
+
 No live filesystem watcher; refresh is manual on purpose.
 
 ## Pi (sandboxed)
 
 [Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `llama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
 
-Config lives in `pi/agent/`: models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with the docs tools exposed directly. `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: copy `pi/templates/godot/AGENTS.md` or `pi/templates/rails/AGENTS.md` to the project's root (for Rails, set the versions and sources to match the app). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
+Config lives in `pi/agent/`: models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with the docs tools exposed directly. `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: copy `pi/templates/godot/AGENTS.md` or `pi/templates/rails/AGENTS.md` to the project's root (for Rails, set the versions and sources to match the app). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately, and refresh the `pi` docs source when you do (see [Refresh](#refresh)).
 
 ### One-time
 
