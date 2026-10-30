@@ -39,7 +39,7 @@ Commands assume your user can run `docker`. If it can't, prefix them with `sudo`
 
 ```bash
 cp .env.example .env
-docker compose up -d --build   # ollama, ollama-pull (fetches nomic-embed-text), mcp-memory
+docker compose up -d --build   # ollama, ollama-pull (fetches nomic-embed-text:v1.5 if missing), mcp-memory
 ```
 
 mcp-memory probes Ollama for the embedding model at startup and exits if it's missing; `ollama-pull` seeds it on first run. The tools return nothing useful until the docs are ingested (below).

@@ -26,8 +26,9 @@ services:
               capabilities: [gpu]
 
   # One-shot service: pulls the embedding model into the ollama-models volume
-  # on every `compose up`. A no-op if it's already present, so re-running is
-  # cheap. Exits when done.
+  # if it's missing, then exits. When it's present, nothing touches the
+  # network (`ollama pull` would re-check the registry every time). The tag is
+  # pinned: new weights would silently mismatch the vectors in docs.db.
   ollama-pull:
     image: ollama/ollama:0.24.0
     depends_on:
@@ -37,14 +38,17 @@ services:
       - ollama-models:/root/.ollama
     environment:
       OLLAMA_HOST: "http://ollama:11434"
-      EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
+      EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text:v1.5}"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
-        echo "Pulling embedding model: $$EMBED_MODEL"
-        ollama pull "$$EMBED_MODEL"
-        echo "Model pulls complete."
+        if ollama show "$$EMBED_MODEL" >/dev/null 2>&1; then
+          echo "Embedding model present: $$EMBED_MODEL"
+        else
+          echo "Pulling embedding model: $$EMBED_MODEL"
+          ollama pull "$$EMBED_MODEL"
+        fi
     restart: "no"
 
   # llama.cpp server for the chat model. Ollama stays for embeddings.
@@ -121,7 +125,7 @@ services:
       MCP_MEMORY_PORT: "3939"
       MCP_DOCS_DB_PATH: "/app/data/docs.db"
       EMBED_BASE_URL: "${EMBED_BASE_URL:-http://ollama:11434}"
-      EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text}"
+      EMBED_MODEL: "${EMBED_MODEL:-nomic-embed-text:v1.5}"
     ports:
       - "${MCP_MEMORY_PORT:-3939}:3939"
     volumes:

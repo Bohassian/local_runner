@@ -16,6 +16,6 @@ function required(key: string, fallback?: string): string {
 export const env = {
   docsDbPath: path.resolve(repoRoot, required('DOCS_DB_PATH', './data/docs.db')),
   embedBaseUrl: required('INGEST_EMBED_BASE_URL', 'http://localhost:11434'),
-  embedModel: required('EMBED_MODEL', 'nomic-embed-text'),
+  embedModel: required('EMBED_MODEL', 'nomic-embed-text:v1.5'),
   repoRoot,
 };

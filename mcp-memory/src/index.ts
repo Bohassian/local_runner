@@ -12,7 +12,7 @@ import { DOCS_TOOL_NAMES, docsToolDefinitions, handleDocsTool } from './tools/do
 
 const PORT = Number.parseInt(process.env.MCP_MEMORY_PORT ?? '3939', 10);
 const EMBED_BASE_URL = process.env.EMBED_BASE_URL ?? 'http://ollama:11434';
-const EMBED_MODEL = process.env.EMBED_MODEL ?? 'nomic-embed-text';
+const EMBED_MODEL = process.env.EMBED_MODEL ?? 'nomic-embed-text:v1.5';
 const DOCS_DB_PATH = process.env.MCP_DOCS_DB_PATH ?? '/app/data/docs.db';
 
 const docsDb = openStore(DOCS_DB_PATH);
