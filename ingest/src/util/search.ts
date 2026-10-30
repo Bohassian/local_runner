@@ -9,7 +9,8 @@ import type { EmbedClient } from './embed.js';
 //   - vector: nomic-embed-text KNN, good for "how do I ..." questions
 //   - fts:    SQLite FTS5 BM25 over heading + text, good for exact words
 //   - symbol: identifiers in the query matched against the symbol table, so
-//             `move_and_slide` or `Node2D global_position` land on the API entry
+//             `move_and_slide`, `Node2D global_position` or
+//             `QueryMethods where` land on the API entry
 
 export type SearchMode = 'vector' | 'fts' | 'hybrid';
 
@@ -35,10 +36,14 @@ const STOPWORDS = new Set(
   ),
 );
 
-// Words in the query, keeping identifier characters (_ . @) together.
+// Separators between an owner and a member: Godot `Node.queue_free`, Ruby
+// `Array#map` (instance) and `File::exist?` (class method / namespace).
+const MEMBER_SEP = /(?:#|::|\.)/;
+
+// Words in the query, keeping identifier characters (_ . @ # :) together.
 function queryTerms(query: string): string[] {
-  return (query.match(/[\p{L}\p{N}_.@]+/gu) ?? [])
-    .map((t) => t.replace(/^[.]+|[.()]+$/g, ''))
+  return (query.match(/[\p{L}\p{N}_.@#:?!]+/gu) ?? [])
+    .map((t) => t.replace(/^[.#:]+|[.():]+$/g, ''))
     .filter((t) => t.length > 1 && !STOPWORDS.has(t.toLowerCase()));
 }
 
@@ -49,86 +54,124 @@ function ftsQuery(terms: string[]): string | null {
   return terms.map((t) => `"${t.replace(/"/g, '""')}"`).join(' OR ');
 }
 
-function sourceFilter(column: string, source?: string): string {
-  return source ? ` AND ${column} = @source` : '';
+// SQL filter on one or more sources; binds @source0, @source1, ...
+function sourceFilter(column: string, sources: string[]): string {
+  if (sources.length === 0) return '';
+  return ` AND ${column} IN (${sources.map((_, i) => `@source${i}`).join(', ')})`;
+}
+function sourceParams(sources: string[]): Record<string, string> {
+  return Object.fromEntries(sources.map((s, i) => [`source${i}`, s]));
 }
 
-function vectorIds(db: DocsDb, vec: number[], source?: string): number[] {
-  return db
-    .prepare<{ vec: Buffer; k: number; source?: string }, { chunk_id: number }>(
-      `SELECT chunk_id FROM chunks_vec
-        WHERE embedding MATCH @vec AND k = @k${sourceFilter('source', source)}
-        ORDER BY distance`,
-    )
-    .all({ vec: embeddingToBuffer(vec), k: CANDIDATES, ...(source ? { source } : {}) })
+// KNN per source when filtering (one vec0 query each, merged by distance), so
+// the filter only relies on vec0's equality support for metadata columns.
+function vectorIds(db: DocsDb, vec: number[], sources: string[]): number[] {
+  const knn = (source?: string) =>
+    db
+      .prepare<{ vec: Buffer; k: number; source?: string }, { chunk_id: number; distance: number }>(
+        `SELECT chunk_id, distance FROM chunks_vec
+          WHERE embedding MATCH @vec AND k = @k${source ? ' AND source = @source' : ''}
+          ORDER BY distance`,
+      )
+      .all({ vec: embeddingToBuffer(vec), k: CANDIDATES, ...(source ? { source } : {}) });
+  const rows = sources.length === 0 ? knn() : sources.flatMap((s) => knn(s));
+  return rows
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, CANDIDATES)
     .map((r) => Number(r.chunk_id));
 }
 
-function ftsIds(db: DocsDb, terms: string[], source?: string): number[] {
+function ftsIds(db: DocsDb, terms: string[], sources: string[]): number[] {
   const match = ftsQuery(terms);
   if (!match) return [];
   // Heading matches weigh 10x body matches; the source column isn't indexed.
   return db
-    .prepare<{ match: string; k: number; source?: string }, { rowid: number }>(
+    .prepare<Record<string, unknown>, { rowid: number }>(
       `SELECT rowid FROM chunks_fts
-        WHERE chunks_fts MATCH @match${sourceFilter('source', source)}
+        WHERE chunks_fts MATCH @match${sourceFilter('source', sources)}
         ORDER BY bm25(chunks_fts, 10.0, 1.0, 0.0)
         LIMIT @k`,
     )
-    .all({ match, k: CANDIDATES, ...(source ? { source } : {}) })
+    .all({ match, k: CANDIDATES, ...sourceParams(sources) })
     .map((r) => r.rowid);
 }
 
-// Terms that look like code: snake_case, dotted, or containing a capital or
-// digit past the first letter (Node2D, CharacterBody2D). Plain English words
-// ("pause", "play") also name members, and matching them swamps
-// natural-language questions with unrelated API entries.
+// Terms that look like code: snake_case, dotted or namespaced, or containing a
+// capital or digit past the first letter (Node2D, CharacterBody2D,
+// QueryMethods). Plain English words ("pause", "play", "where") also name
+// members, and matching them alone swamps natural-language questions with
+// unrelated API entries.
 function looksLikeIdentifier(term: string): boolean {
-  return /[_.@]/.test(term) || /^.+[A-Z0-9]/.test(term) || /^[A-Z][a-z]+$/.test(term);
+  return /[_.@#]|::/.test(term) || /^.+[A-Z0-9]/.test(term) || /^[A-Z][a-z]+$/.test(term);
 }
 
-// Exact `Class.member` names first (from dotted terms, adjacent term pairs, or
-// a plain-word class name paired with another query word), then class names,
-// then bare member names.
-function symbolIds(db: DocsDb, terms: string[], source?: string): number[] {
-  const lc = terms.filter(looksLikeIdentifier).map((t) => t.toLowerCase());
-  const full = new Set(lc.filter((t) => t.includes('.')));
-  for (let i = 0; i + 1 < lc.length; i++) full.add(`${lc[i]}.${lc[i + 1]}`);
-  const bare = new Set(lc.flatMap((t) => t.split('.')).filter((t) => t.length > 1));
+// The owner part of a qualified name: `activerecord::querymethods` for
+// `activerecord::querymethods#where`, `label` for `label.text`.
+function ownerOf(nameLc: string): string {
+  return nameLc.replace(new RegExp(`${MEMBER_SEP.source}[^#:.]+$`), '');
+}
 
-  const byName = db.prepare<{ name: string; source?: string }, { chunk_id: number }>(
-    `SELECT chunk_id FROM symbols
-      WHERE name_lc = @name AND chunk_id IS NOT NULL${sourceFilter('source', source)}`,
+// Candidates, in order:
+//   1. qualified terms matching a symbol exactly (`Tween.tween_property`,
+//      `ActiveRecord::Base#save`)
+//   2. members of a class named in the query, for any other query word
+//      ("label" + "text" -> Label.text; "QueryMethods" + "where" ->
+//      ActiveRecord::QueryMethods#where)
+//   3. the classes themselves
+//   4. bare identifier-like terms as a symbol or member name
+// A class term matches a class's full name or its last `::` segment, so
+// `QueryMethods` finds `ActiveRecord::QueryMethods`.
+function symbolIds(db: DocsDb, terms: string[], sources: string[]): number[] {
+  const all = terms.map((t) => t.toLowerCase());
+  // A one-word query is an API name even when it's a plain word ("pluck").
+  const ident = (terms.length === 1 ? terms : terms.filter(looksLikeIdentifier)).map((t) =>
+    t.toLowerCase(),
   );
-  const isClass = db.prepare<{ name: string; source?: string }, { chunk_id: number }>(
-    `SELECT chunk_id FROM symbols
-      WHERE name_lc = @name AND kind = 'class' AND chunk_id IS NOT NULL${sourceFilter('source', source)}`,
-  );
+  const params = sourceParams(sources);
+  const filter = sourceFilter('source', sources);
 
-  // Plain words that name a class ("label", "button") count too, but only as
-  // classes: "text of a label" means Label, plus Label.text when another word
-  // in the query names one of its members. Bare plain words are still kept out
-  // of member matching (see looksLikeIdentifier).
-  const plain = terms.map((t) => t.toLowerCase()).filter((t) => !lc.includes(t));
-  const classWords = plain.filter(
-    (t) => isClass.get({ name: t, ...(source ? { source } : {}) }) !== undefined,
+  const byName = db.prepare<Record<string, unknown>, { chunk_id: number }>(
+    `SELECT chunk_id FROM symbols WHERE name_lc = @name AND chunk_id IS NOT NULL${filter}`,
   );
-  for (const cls of classWords) {
-    for (const other of plain) if (other !== cls) full.add(`${cls}.${other}`);
-  }
-  const byMember = db.prepare<{ name: string; source?: string }, { chunk_id: number }>(
-    `SELECT chunk_id FROM symbols
-      WHERE member_lc = @name AND chunk_id IS NOT NULL${sourceFilter('source', source)}
-      LIMIT 20`,
+  const classes = db.prepare<Record<string, unknown>, { chunk_id: number; name_lc: string }>(
+    `SELECT chunk_id, name_lc FROM symbols
+      WHERE kind = 'class' AND (name_lc = @name OR name_lc LIKE '%::' || @name)
+        AND chunk_id IS NOT NULL${filter}
+      LIMIT 10`,
   );
-  const params = (name: string) => ({ name, ...(source ? { source } : {}) });
+  const membersNamed = db.prepare<Record<string, unknown>, { chunk_id: number; name_lc: string }>(
+    `SELECT chunk_id, name_lc FROM symbols WHERE member_lc = @name AND chunk_id IS NOT NULL${filter}`,
+  );
+  const byMember = db.prepare<Record<string, unknown>, { chunk_id: number }>(
+    `SELECT chunk_id FROM symbols WHERE member_lc = @name AND chunk_id IS NOT NULL${filter} LIMIT 20`,
+  );
 
   const ids: number[] = [];
-  for (const name of full) ids.push(...byName.all(params(name)).map((r) => r.chunk_id));
-  for (const name of classWords) ids.push(...isClass.all(params(name)).map((r) => r.chunk_id));
+
+  for (const t of ident.filter((t) => MEMBER_SEP.test(t))) {
+    ids.push(...byName.all({ name: t, ...params }).map((r) => r.chunk_id));
+  }
+
+  const classHits = new Map<string, Array<{ chunk_id: number; name_lc: string }>>();
+  for (const t of new Set(all)) {
+    const hits = classes.all({ name: t, ...params });
+    if (hits.length > 0) classHits.set(t, hits);
+  }
+  for (const [cls, hits] of classHits) {
+    const owners = new Set(hits.map((h) => h.name_lc));
+    for (const word of new Set(all)) {
+      if (word === cls) continue;
+      for (const m of membersNamed.all({ name: word, ...params })) {
+        if (owners.has(ownerOf(m.name_lc))) ids.push(m.chunk_id);
+      }
+    }
+  }
+  for (const hits of classHits.values()) ids.push(...hits.map((h) => h.chunk_id));
+
+  const bare = new Set(ident.flatMap((t) => t.split(/[.#:]+/)).filter((t) => t.length > 1));
   for (const name of bare) {
-    ids.push(...byName.all(params(name)).map((r) => r.chunk_id));
-    ids.push(...byMember.all(params(name)).map((r) => r.chunk_id));
+    ids.push(...byName.all({ name, ...params }).map((r) => r.chunk_id));
+    ids.push(...byMember.all({ name, ...params }).map((r) => r.chunk_id));
   }
   return [...new Set(ids)].slice(0, CANDIDATES);
 }
@@ -145,19 +188,19 @@ export async function searchDocs(
   db: DocsDb,
   embed: EmbedClient,
   query: string,
-  opts: { k?: number; source?: string; mode?: SearchMode } = {},
+  opts: { k?: number; sources?: string[]; mode?: SearchMode } = {},
 ): Promise<SearchResult[]> {
-  const { k = 5, source, mode = 'hybrid' } = opts;
+  const { k = 5, sources = [], mode = 'hybrid' } = opts;
   const terms = queryTerms(query);
 
   const lists: number[][] = [];
   if (mode !== 'fts') {
     const [vec] = await embed.embedBatch([`${QUERY_PREFIX}${query}`]);
-    lists.push(vectorIds(db, vec, source));
+    lists.push(vectorIds(db, vec, sources));
   }
   if (mode !== 'vector') {
-    lists.push(ftsIds(db, terms, source));
-    lists.push(symbolIds(db, terms, source));
+    lists.push(ftsIds(db, terms, sources));
+    lists.push(symbolIds(db, terms, sources));
   }
 
   const row = db.prepare<

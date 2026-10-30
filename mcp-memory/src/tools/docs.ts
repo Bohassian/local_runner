@@ -32,14 +32,21 @@ function sourceIds(db: DocsDb): string[] {
     .map((r) => r.id);
 }
 
-// Tool definitions are built per request so `source` enums track whatever
-// is currently ingested.
+// Tool definitions are built per request so source enums track whatever is
+// currently ingested.
 export function docsToolDefinitions(db: DocsDb) {
   const ids = sourceIds(db);
   const source = {
     type: 'string',
-    description: 'Limit to one docs source (see list_docs). Omit to search all.',
+    description: 'A docs source id (see list_docs).',
     ...(ids.length > 0 ? { enum: ids } : {}),
+  };
+  const sources = {
+    type: 'array',
+    items: source,
+    description:
+      'Limit to these docs sources (see list_docs), e.g. the ones the project ' +
+      'uses. Omit to search all.',
   };
 
   return [
@@ -65,7 +72,7 @@ export function docsToolDefinitions(db: DocsDb) {
             type: 'string',
             description: 'A question, or API names, e.g. "move_and_slide floor detection".',
           },
-          source,
+          sources,
           k: {
             type: 'integer',
             description: 'How many results to return. Default 5, max 20.',
@@ -81,15 +88,16 @@ export function docsToolDefinitions(db: DocsDb) {
       name: 'lookup_symbol',
       description:
         'Look up an API symbol by name and return its reference entry ' +
-        '(signature and description). Accepts "Class.member" (e.g. ' +
-        '"CharacterBody2D.move_and_slide"), a bare member ("move_and_slide"), ' +
-        'or a class name ("Node2D", which also lists its members). Use it to ' +
-        'confirm exact names and signatures before using them.',
+        '(signature and description). Accepts a qualified member (e.g. ' +
+        '"CharacterBody2D.move_and_slide", "ActiveRecord::QueryMethods#where", ' +
+        '"QueryMethods#where"), a bare member ("move_and_slide"), or a class or ' +
+        'module ("Node2D", which also lists its members). Use it to confirm ' +
+        'exact names and signatures before using them.',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Symbol name, e.g. "Tween.tween_property".' },
-          source,
+          sources,
         },
         required: ['name'],
       },
@@ -119,7 +127,22 @@ export function docsToolDefinitions(db: DocsDb) {
 export const DOCS_TOOL_NAMES = new Set(['list_docs', 'search_docs', 'lookup_symbol', 'read_doc']);
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
-const optSource = (v: unknown) => str(v) || undefined;
+
+// `sources` as an array, tolerating a single string (or the old `source`).
+function sourceList(args: Record<string, unknown>): string[] {
+  const raw = args.sources ?? args.source;
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.map(str).filter(Boolean);
+}
+
+// SQL filter on one or more sources; binds @source0, @source1, ...
+function sourceFilter(column: string, sources: string[]): string {
+  if (sources.length === 0) return '';
+  return ` AND ${column} IN (${sources.map((_, i) => `@source${i}`).join(', ')})`;
+}
+function sourceParams(sources: string[]): Record<string, string> {
+  return Object.fromEntries(sources.map((s, i) => [`source${i}`, s]));
+}
 
 function handleListDocs(db: DocsDb): ToolResult {
   const rows = db
@@ -145,11 +168,12 @@ async function handleSearchDocs(deps: DocsDeps, args: Record<string, unknown>): 
   if (!query) throw new Error('`query` must be a non-empty string');
   const kRaw = typeof args.k === 'number' ? args.k : 5;
   const k = Math.max(1, Math.min(20, Math.floor(kRaw)));
-  const source = optSource(args.source);
+  const sources = sourceList(args);
 
-  const results = await searchDocs(deps.db, deps.embed, query, { k, source });
+  const results = await searchDocs(deps.db, deps.embed, query, { k, sources });
   if (results.length === 0) {
-    return text(`No matches for "${query}"${source ? ` in ${source}` : ''}. Try other wording, or list_docs to see what is indexed.`);
+    const where = sources.length > 0 ? ` in ${sources.join(', ')}` : '';
+    return text(`No matches for "${query}"${where}. Try other wording, or list_docs to see what is indexed.`);
   }
   return text(
     results
@@ -170,19 +194,26 @@ interface SymbolRow {
   source: string;
   path: string;
   chunk_id: number | null;
+  page_id: number;
 }
 
 function handleLookupSymbol(db: DocsDb, args: Record<string, unknown>): ToolResult {
   const name = str(args.name).replace(/\(\)$/, '');
   if (!name) throw new Error('`name` must be a non-empty string');
-  const source = optSource(args.source);
+  const sources = sourceList(args);
   const lc = name.toLowerCase();
-  const filter = source ? ' AND s.source = @source' : '';
-  const params = { lc, ...(source ? { source } : {}) };
-  const select = `SELECT s.name, s.kind, s.source, p.path, s.chunk_id
+  const filter = sourceFilter('s.source', sources);
+  const params: Record<string, unknown> = { lc, ...sourceParams(sources) };
+  const select = `SELECT s.name, s.kind, s.source, p.path, s.chunk_id, s.page_id
                     FROM symbols s JOIN pages p ON p.id = s.page_id`;
 
   let rows = db.prepare<typeof params, SymbolRow>(`${select} WHERE s.name_lc = @lc${filter}`).all(params);
+  if (rows.length === 0) {
+    // Namespace left off: "QueryMethods#where" -> "ActiveRecord::QueryMethods#where".
+    rows = db
+      .prepare<typeof params, SymbolRow>(`${select} WHERE s.name_lc LIKE '%::' || @lc ESCAPE '\\'${filter} LIMIT 50`)
+      .all({ ...params, lc: lc.replace(/[\\%_]/g, '\\$&') });
+  }
   if (rows.length === 0) {
     rows = db
       .prepare<typeof params, SymbolRow>(`${select} WHERE s.member_lc = @lc${filter} ORDER BY s.name LIMIT 50`)
@@ -216,9 +247,9 @@ function handleLookupSymbol(db: DocsDb, args: Record<string, unknown>): ToolResu
   }
 
   const chunk = db.prepare<[number], { text: string }>(`SELECT text FROM chunks WHERE id = ?`);
-  const members = db.prepare<{ prefix: string; source: string }, { name: string; kind: string }>(
-    `SELECT name, kind FROM symbols
-      WHERE source = @source AND name_lc LIKE @prefix ESCAPE '\\' ORDER BY kind, name`,
+  // A class's members are the other symbols documented on its page.
+  const members = db.prepare<{ page: number; name: string }, { name: string; kind: string }>(
+    `SELECT name, kind FROM symbols WHERE page_id = @page AND name != @name ORDER BY kind, name`,
   );
 
   return text(
@@ -227,12 +258,14 @@ function handleLookupSymbol(db: DocsDb, args: Record<string, unknown>): ToolResu
         const body = r.chunk_id != null ? chunk.get(r.chunk_id)?.text ?? '' : '';
         let out = `### ${r.name} (${r.kind})\nsource: ${r.source} | path: ${r.path}\n\n${body}`;
         if (r.kind === 'class') {
-          const prefix = `${r.name.toLowerCase().replace(/[\\%_]/g, '\\$&')}.%`;
-          const list = members.all({ prefix, source: r.source });
+          const list = members.all({ page: r.page_id, name: r.name });
           if (list.length > 0) {
             const byKind = new Map<string, string[]>();
             for (const m of list) {
-              const short = m.name.slice(r.name.length + 1);
+              // Strip the owner and its separator (".", "#" or "::").
+              const short = m.name.startsWith(r.name)
+                ? m.name.slice(r.name.length).replace(/^(?:#|::|\.)/, '')
+                : m.name;
               byKind.set(m.kind, [...(byKind.get(m.kind) ?? []), short]);
             }
             // Capped per kind: @GlobalScope alone has hundreds of constants.

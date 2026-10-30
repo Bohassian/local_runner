@@ -9,6 +9,7 @@ import type { Page, Reader } from './readers/types.js';
 import { readRst } from './readers/rst.js';
 import { readGodotClassRef } from './readers/godot-classref.js';
 import { readMarkdown } from './readers/markdown.js';
+import { readDevDocs } from './readers/devdocs.js';
 
 // Ingests sources from ingest/sources.json into the docs store (data/docs.db).
 //
@@ -25,14 +26,18 @@ interface SourceConfig {
   format: string;
   // Directory under data/.
   path: string;
-  // Path prefixes (relative to `path`) to include; "" includes everything.
-  include: string[];
+  // Path prefixes (relative to `path`) to include; omitted or "" includes
+  // everything.
+  include?: string[];
 }
 
-const READERS: Record<string, { reader: Reader; ext: RegExp }> = {
+// File readers turn one file into a page; bundle readers read a whole source
+// directory at once (DevDocs ships a single db.json).
+const READERS: Record<string, { reader: Reader; ext: RegExp } | { bundle: (root: string) => Page[] }> = {
   rst: { reader: readRst, ext: /\.rst$/ },
   'godot-classref': { reader: readGodotClassRef, ext: /\.rst$/ },
   markdown: { reader: readMarkdown, ext: /\.(md|mdx|markdown|txt)$/i },
+  devdocs: { bundle: readDevDocs },
 };
 
 const BATCH_SIZE = 32;
@@ -56,6 +61,14 @@ function listFiles(root: string, ext: RegExp): string[] {
   return out.sort();
 }
 
+// A DevDocs bundle's release (from the meta.json fetch-docs writes), so the
+// version shown by list_docs is the one actually downloaded.
+function bundleVersion(root: string): string | undefined {
+  const meta = path.join(root, 'meta.json');
+  if (!fs.existsSync(meta)) return undefined;
+  return (JSON.parse(fs.readFileSync(meta, 'utf8')) as { release?: string }).release;
+}
+
 interface PendingChunk {
   pageIndex: number;
   heading: string;
@@ -72,16 +85,18 @@ async function ingest(src: SourceConfig) {
     return;
   }
 
-  const files = listFiles(root, fmt.ext).filter((f) => {
-    const rel = path.relative(root, f);
-    return src.include.some((prefix) => rel.startsWith(prefix));
-  });
-
+  const inScope = (rel: string) => (src.include ?? ['']).some((prefix) => rel.startsWith(prefix));
+  let files: string[] = [];
   const pages: Page[] = [];
-  for (const file of files) {
-    const rel = path.relative(root, file);
-    const page = fmt.reader(root, rel, fs.readFileSync(file, 'utf8'));
-    if (page) pages.push(page);
+  if ('bundle' in fmt) {
+    pages.push(...fmt.bundle(root).filter((p) => inScope(p.path)));
+  } else {
+    files = listFiles(root, fmt.ext).filter((f) => inScope(path.relative(root, f)));
+    for (const file of files) {
+      const rel = path.relative(root, file);
+      const page = fmt.reader(root, rel, fs.readFileSync(file, 'utf8'));
+      if (page) pages.push(page);
+    }
   }
 
   const chunks: PendingChunk[] = [];
@@ -94,7 +109,7 @@ async function ingest(src: SourceConfig) {
   });
   const symbolCount = pages.reduce((n, p) => n + p.symbols.length, 0);
   console.log(
-    `[${src.id}] ${files.length} files -> ${pages.length} pages, ${chunks.length} chunks, ${symbolCount} symbols`,
+    `[${src.id}] ${'bundle' in fmt ? 'bundle' : `${files.length} files`} -> ${pages.length} pages, ${chunks.length} chunks, ${symbolCount} symbols`,
   );
 
   // Embed everything before touching the DB, so a failed run leaves the
@@ -174,7 +189,7 @@ async function ingest(src: SourceConfig) {
     insertSource.run(
       src.id,
       src.name,
-      src.version,
+      bundleVersion(root) ?? src.version,
       src.description,
       src.format,
       pages.length,

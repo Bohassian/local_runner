@@ -50,14 +50,24 @@ function buildServer(): Server {
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args } = req.params;
-    if (DOCS_TOOL_NAMES.has(name)) {
-      return handleDocsTool(
+    if (!DOCS_TOOL_NAMES.has(name)) throw new Error(`Unknown tool: ${name}`);
+
+    // One line per call, so `docker compose logs -f mcp-memory` shows what
+    // the model looked up and how much came back.
+    const started = Date.now();
+    try {
+      const result = await handleDocsTool(
         { db: docsDb, embed },
         name,
         (args ?? {}) as Record<string, unknown>,
       );
+      const chars = result.content.reduce((n, c) => n + c.text.length, 0);
+      console.log(`tool ${name} ${JSON.stringify(args ?? {})} -> ${chars} chars, ${Date.now() - started} ms`);
+      return result;
+    } catch (err) {
+      console.log(`tool ${name} ${JSON.stringify(args ?? {})} -> error: ${(err as Error).message}`);
+      throw err;
     }
-    throw new Error(`Unknown tool: ${name}`);
   });
 
   return server;

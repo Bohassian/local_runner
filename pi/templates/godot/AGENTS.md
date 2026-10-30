@@ -8,10 +8,10 @@ This is a Godot 4 project.
 - Docs sources for this project: `godot-api` (class reference) and
   `godot-manual` (manual and tutorials).
 - Before using any Godot class, method, property, or signal, confirm its exact
-  name and signature with `mcp__memory__lookup_symbol` (source `godot-api`).
+  name and signature with `mcp__memory__lookup_symbol` (sources `["godot-api"]`).
   Do not guess Godot APIs.
-- For how-tos and engine concepts, use `mcp__memory__search_docs` (source
-  `godot-manual`, or no source to search both).
+- For how-tos and engine concepts, use `mcp__memory__search_docs` (sources
+  `["godot-manual", "godot-api"]`).
 - Write Godot 4 GDScript, not Godot 3 (e.g. `@export`, `@onready`,
   `signal.connect(callable)`, `super()`).
 - Use static typing (`var speed: float = 200.0`, typed function signatures).

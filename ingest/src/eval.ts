@@ -18,6 +18,8 @@ interface EvalQuery {
   query: string;
   pages: string[];
   symbol?: string;
+  // Limit the search to these sources, as a project's AGENTS.md would.
+  sources?: string[];
 }
 
 const MODES: SearchMode[] = ['vector', 'fts', 'hybrid'];
@@ -64,7 +66,9 @@ for (const mode of modes) {
   let noise = 0;
 
   for (const q of queries) {
-    const got = (await searchDocs(store, embed, q.query, { k, mode })).map((r) => r.path);
+    const got = (await searchDocs(store, embed, q.query, { k, mode, sources: q.sources })).map(
+      (r) => r.path,
+    );
     // Reciprocal rank of the first result from an expected page (0 if none).
     const rank = got.findIndex((p) => q.pages.includes(p));
     const tally = byKind.get(q.kind) ?? { hits: 0, rr: 0, total: 0 };

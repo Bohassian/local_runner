@@ -13,11 +13,11 @@ A local documentation index is available through these tools. Use the full
 names exactly as written:
 
 - `mcp__memory__list_docs`: which docs sources exist and what they cover.
-- `mcp__memory__search_docs` (`query`, optional `source`, `k`): search guides
-  and API references. Works for questions and for API names.
-- `mcp__memory__lookup_symbol` (`name`, optional `source`): one API entry by
-  name, e.g. `Class.method`, a bare method name, or a class (which also lists
-  its members).
+- `mcp__memory__search_docs` (`query`, optional `sources` list, `k`): search
+  guides and API references. Works for questions and for API names.
+- `mcp__memory__lookup_symbol` (`name`, optional `sources` list): one API entry
+  by name, e.g. `Class.method`, `Module::Class#method`, a bare method name, or
+  a class (which also lists its members).
 - `mcp__memory__read_doc` (`source`, `path`, optional `section`): a whole page
   or one section, when a result is cut off.
 
@@ -26,7 +26,7 @@ How to use them:
 - Before relying on memory for an API these docs cover, confirm it: names and
   signatures with `lookup_symbol`, behavior and how-tos with `search_docs`.
 - The workspace's `AGENTS.md` may say which sources apply to the project; pass
-  that `source` when it does.
+  them as `sources` when it does, so results match the project's versions.
 - This is not a web search. For anything the docs don't cover, read the
   project's own code and docs.
 

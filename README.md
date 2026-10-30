@@ -52,7 +52,11 @@ mcp-memory serves local documentation to Pi through four tools: `list_docs`, `se
 |---|---|---|
 | `godot-manual` | Godot 4 manual + tutorials | `data/godot-docs/` (RST) |
 | `godot-api` | Godot 4 class reference, ~27k symbols | `data/godot-docs/classes/` (RST) |
+| `rails~7.1`, `rails~8.1` | Rails API reference + Rails Guides | `data/devdocs/` (DevDocs bundles) |
+| `ruby~3.2`, `ruby~4.0` | Ruby core + standard library | `data/devdocs/` (DevDocs bundles) |
 | `reference` | Your own markdown notes | `data/reference/` (optional) |
+
+Several versions of a stack coexist. Each project's `AGENTS.md` names the sources matching its versions, and Pi passes them as `sources` (templates in `pi/templates/`).
 
 ### One-time: clone the Godot docs
 
@@ -62,6 +66,14 @@ git clone --depth 1 https://github.com/godotengine/godot-docs data/godot-docs
 ```
 
 (Use `--depth 1` to skip ~1.5 GB of history. Re-pull with `git -C data/godot-docs pull` when you want fresher docs.)
+
+### One-time: fetch DevDocs bundles (Rails, Ruby, ...)
+
+```bash
+cd ingest && yarn fetch-docs rails~7.1 ruby~3.2 rails~8.1 ruby~4.0   # ~45 MB from devdocs.io
+```
+
+This is the only networked step for these sources; ingest and search read the files in `data/devdocs/<slug>/`. Re-running only re-downloads bundles that changed upstream. Slugs are listed at https://devdocs.io/docs.json (e.g. `react`, `typescript`, `postgresql~16`).
 
 ### One-time: install host-side ingest deps
 
@@ -83,9 +95,9 @@ cd ingest
 yarn ingest --all                     # or specific sources: yarn ingest godot-api
 ```
 
-Roughly 2 minutes for both Godot sources on the 4070. Each run replaces that source's rows entirely, and embeds before writing, so a failed run leaves the previous copy intact.
+Roughly 2 minutes for both Godot sources and about 40 s per Rails/Ruby bundle on the 4070; all six sources come to ~63k chunks and a ~350 MB `docs.db`. Each run replaces that source's rows entirely, and embeds before writing, so a failed run leaves the previous copy intact.
 
-To add a source, add an entry to `ingest/sources.json` (`format`: `rst`, `godot-classref` or `markdown`; `path` under `data/`; `include` path prefixes) and run `yarn ingest <id>`. The tools pick it up without a restart.
+To add a source, add an entry to `ingest/sources.json` (`format`: `rst`, `godot-classref`, `markdown` or `devdocs`; `path` under `data/`; optional `include` path prefixes) and run `yarn ingest <id>`. For a DevDocs bundle, `yarn fetch-docs <slug>` first and use `"path": "devdocs/<slug>"`. The tools pick new sources up without a restart.
 
 ### Rebuild mcp-memory
 
@@ -102,16 +114,16 @@ mcp-memory probes Ollama for the embedding model at startup. If `nomic-embed-tex
 docker compose --profile pi run --rm --no-deps pi mcp list
 ```
 
-Or from Pi (`pibox`, see below): "Use lookup_symbol to get the signature of Tween.tween_property." Watch `docker compose logs -f mcp-memory` to confirm the model is actually calling the tools.
+Or from Pi (`pibox`, see below): "Use lookup_symbol to get the signature of Tween.tween_property." Watch `docker compose logs -f mcp-memory` to confirm the model is actually calling the tools: each call logs one line with the tool, its arguments, the result size and the time taken.
 
 ### Measure retrieval
 
-`ingest/eval/godot.json` holds 31 Godot questions with their expected pages. `yarn eval` reports hit@5 (right page in the top 5) per question kind for each search mode. Run it after changing readers, chunking or search to see whether retrieval got better or worse.
+`ingest/eval/godot.json` (41 questions) and `ingest/eval/rails.json` (24, limited to `rails~7.1` + `ruby~3.2`) hold questions with their expected pages. `yarn eval` reports hit@5 (right page in the top 5) and MRR per question kind for each search mode. Run both sets after changing readers, chunking or search to see whether retrieval got better or worse.
 
 ```bash
 cd ingest
-yarn eval                    # all modes
-yarn eval godot 5 hybrid     # one mode
+yarn eval                    # godot set, all modes
+yarn eval rails 5 hybrid     # one set, one mode
 ```
 
 ### Refresh workflow
@@ -184,7 +196,7 @@ curl -s http://localhost:8080/v1/chat/completions -H 'Content-Type: application/
 
 [Pi](https://pi.dev) runs in a container that can see **only** the project folder you hand it, and sits on an internal Docker network that reaches `llama` and `mcp-memory` and nothing else (no internet, no LAN, no host ports). Pi has no approval prompts by design — this is what keeps it from wandering your filesystem.
 
-Config lives in `pi/agent/` (models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with the docs tools exposed directly). `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: for a Godot project, copy `pi/templates/godot/AGENTS.md` to its root. Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
+Config lives in `pi/agent/` (models → `http://llama:8080/v1`, MCP → `http://mcp-memory:3939/mcp` with the docs tools exposed directly). `pi/agent/AGENTS.md` holds project-neutral instructions. Pi also reads an `AGENTS.md` in the workspace (and its parents), so per-project rules go there: copy `pi/templates/godot/AGENTS.md` or `pi/templates/rails/AGENTS.md` to the project's root (for Rails, set the versions to match the app). Sessions land in `pi/agent/sessions/` (gitignored). The image pins `@earendil-works/pi-coding-agent@1.0.2`; bump `PI_VERSION` in `pi/Dockerfile` deliberately.
 
 ### One-time
 

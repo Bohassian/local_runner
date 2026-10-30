@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "eval": "tsx src/eval.ts",
-    "ingest": "tsx src/ingest-docs.ts"
+    "ingest": "tsx src/ingest-docs.ts",
+    "fetch-docs": "tsx src/fetch-devdocs.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
