@@ -1,5 +1,6 @@
 # Working style
 
+- Always use personal skills (`agent/skills/personal/SKILL.md`)
 - Match the existing code: its naming, structure, comment density, and idioms.
 - Keep changes focused on the request. Don't refactor or reformat unrelated
   code.
